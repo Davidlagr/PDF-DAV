@@ -4,8 +4,20 @@ from pdf2docx import Converter
 import tempfile
 import os
 from io import BytesIO
+from PIL import Image
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="centered")
+
+# Inicializar variables de estado para guardar las coordenadas de los clics
+if "firma_x" not in st.session_state:
+    st.session_state.firma_x = 50.0
+if "firma_y" not in st.session_state:
+    st.session_state.firma_y = 50.0
+if "texto_x" not in st.session_state:
+    st.session_state.texto_x = 50.0
+if "texto_y" not in st.session_state:
+    st.session_state.texto_y = 50.0
 
 st.sidebar.title("Módulos PDF")
 opcion = st.sidebar.radio("Selecciona una herramienta:", 
@@ -88,13 +100,12 @@ elif opcion == "Unir y Reorganizar":
                 )
 
 # ==========================================
-# MÓDULO 3: FIRMAR PDF (Corregido y Optimizado)
+# MÓDULO 3: FIRMAR PDF (Clic interactivo)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
-    st.info("Sube tu documento y la imagen de tu firma. Ajusta las coordenadas y visualiza el resultado en tiempo real.")
+    st.info("Sube tu documento y tu firma. Haz clic en la vista previa del documento para ubicar la firma.")
     
-    # 1. Subir solo el PDF primero para dar retroalimentación visual inmediata
     archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma")
     
     if archivo_pdf:
@@ -104,42 +115,45 @@ elif opcion == "Firmar PDF":
         
         st.write("### Selecciona la página")
         pagina_firma = st.number_input("Página a firmar:", min_value=1, max_value=num_paginas, value=1)
-        
-        # Dimensiones seguras de la página
-        page_info = doc_info[pagina_firma - 1]
-        max_width = float(page_info.rect.width)
-        max_height = float(page_info.rect.height)
         doc_info.close()
 
-        # 2. Subir la firma
         archivo_firma = st.file_uploader("Paso 2: Sube la imagen de tu firma", type=["png", "jpg", "jpeg"], key="img_firma")
         
         if archivo_firma:
             firma_bytes = archivo_firma.getvalue()
             
-            st.write("### Ajustes de Posición y Tamaño")
+            st.write("### Tamaño de la Firma")
             col_x, col_y = st.columns(2)
-            
-            # Cálculos seguros para evitar errores si la página es pequeña
-            default_x = max(0.0, min(max_width, max_width - 160.0))
-            default_y = max(0.0, min(max_height, max_height - 100.0))
-            
             with col_x:
-                pos_x = st.slider("Posición Horizontal (X)", 0.0, max_width, default_x, key="firma_x")
-                ancho_firma = st.slider("Ancho de la firma", 10.0, max(11.0, max_width), min(150.0, max_width), key="firma_ancho")
+                ancho_firma = st.slider("Ancho", 10.0, 500.0, 150.0, key="firma_ancho")
             with col_y:
-                pos_y = st.slider("Posición Vertical (Y)", 0.0, max_height, default_y, key="firma_y")
-                alto_firma = st.slider("Alto de la firma", 10.0, max(11.0, max_height), min(50.0, max_height), key="firma_alto")
+                alto_firma = st.slider("Alto", 10.0, 500.0, 50.0, key="firma_alto")
 
-            st.write("### Vista Previa con Firma")
+            st.write("### Haz clic en el documento para colocar tu firma")
+            
+            # Generar vista previa fresca en cada interacción
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
-            rect_firma = fitz.Rect(pos_x, pos_y, pos_x + ancho_firma, pos_y + alto_firma)
+            # Insertar la firma en la posición guardada en session_state
+            rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, 
+                                   st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
             page_preview.insert_image(rect_firma, stream=firma_bytes)
             
-            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            st.image(pix.tobytes("png"), use_container_width=True)
+            # Renderizar página a escala 1:1 para coordenadas precisas
+            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # Capturar clic del usuario
+            coords = streamlit_image_coordinates(img_pil, key="coordenadas_firma")
+            
+            # Si el usuario hace clic en una nueva posición, actualizar estado y recargar
+            if coords is not None:
+                if coords["x"] != st.session_state.firma_x or coords["y"] != st.session_state.firma_y:
+                    st.session_state.firma_x = float(coords["x"])
+                    st.session_state.firma_y = float(coords["y"])
+                    st.rerun()
+
             doc_preview.close()
             
             if st.button("Aplicar Firma y Descargar"):
@@ -159,22 +173,13 @@ elif opcion == "Firmar PDF":
                         file_name=f"firmado_{archivo_pdf.name}",
                         mime="application/pdf"
                     )
-        else:
-            # Mostrar documento mientras se espera la firma
-            st.warning("Sube la imagen de tu firma para poder ajustarla.")
-            st.write("### Vista Previa del Documento (Sin firma)")
-            doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
-            page_preview = doc_preview[pagina_firma - 1]
-            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            st.image(pix.tobytes("png"), use_container_width=True)
-            doc_preview.close()
 
 # ==========================================
-# MÓDULO 4: EDITAR Y RELLENAR PDF
+# MÓDULO 4: EDITAR Y RELLENAR PDF (Clic interactivo)
 # ==========================================
 elif opcion == "Editar y Rellenar PDF":
     st.header("📝 Editar y Rellenar PDF")
-    st.info("Añade texto directamente sobre cualquier página del PDF (ideal para rellenar formularios).")
+    st.info("Escribe tu texto y haz clic en el documento para ubicarlo.")
     
     archivo_pdf = st.file_uploader("Sube el PDF a rellenar", type=["pdf"])
     
@@ -183,38 +188,40 @@ elif opcion == "Editar y Rellenar PDF":
         doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
         num_paginas = len(doc_info)
         
-        pagina_texto = st.number_input("Página donde insertarás el texto:", min_value=1, max_value=num_paginas, value=1)
-        texto_insertar = st.text_input("Texto a insertar:", "Ejemplo de texto")
-        
-        page_info = doc_info[pagina_texto - 1]
-        max_width = float(page_info.rect.width)
-        max_height = float(page_info.rect.height)
+        pagina_texto = st.number_input("Página:", min_value=1, max_value=num_paginas, value=1)
+        texto_insertar = st.text_input("Texto a insertar:", "Escribe tu texto aquí")
         doc_info.close()
 
-        st.write("### Ajustes de Posición del Texto")
+        st.write("### Ajustes del Texto")
         col_x, col_y = st.columns(2)
-        
-        default_x_txt = min(max_width, 50.0)
-        default_y_txt = min(max_height, 50.0)
-        
         with col_x:
-            pos_x_txt = st.slider("Posición Horizontal (X)", 0.0, max_width, default_x_txt, key="txt_x")
             tamano_fuente = st.slider("Tamaño de fuente", 8, 72, 12)
         with col_y:
-            pos_y_txt = st.slider("Posición Vertical (Y)", 0.0, max_height, default_y_txt, key="txt_y")
             color_texto = st.color_picker("Color del texto", "#000000")
 
         rgb_color = tuple(int(color_texto.lstrip('#')[i:i+2], 16)/255 for i in (0, 2, 4))
 
-        st.write("### Vista Previa")
+        st.write("### Haz clic en el documento para colocar el texto")
+        
         doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
         page_preview = doc_preview[pagina_texto - 1]
         
-        p = fitz.Point(pos_x_txt, pos_y_txt)
+        # PyMuPDF usa el punto inferior izquierdo como inicio del texto
+        p = fitz.Point(st.session_state.texto_x, st.session_state.texto_y)
         page_preview.insert_text(p, texto_insertar, fontsize=tamano_fuente, color=rgb_color)
         
-        pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-        st.image(pix.tobytes("png"), use_container_width=True)
+        pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+        img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        
+        # Capturar clic
+        coords = streamlit_image_coordinates(img_pil, key="coordenadas_texto")
+        
+        if coords is not None:
+            if coords["x"] != st.session_state.texto_x or coords["y"] != st.session_state.texto_y:
+                st.session_state.texto_x = float(coords["x"])
+                st.session_state.texto_y = float(coords["y"])
+                st.rerun()
+
         doc_preview.close()
         
         if st.button("Aplicar Texto y Descargar"):
