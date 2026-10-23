@@ -2,3 +2,4 @@ streamlit
 PyMuPDF
 pdf2docx
 Pillow
+streamlit-image-coordinates
