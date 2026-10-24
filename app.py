@@ -148,86 +148,135 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
-    archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma")
-    if archivo_pdf:
-        pdf_bytes = archivo_pdf.getvalue()
-        doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
-        num_paginas = len(doc_info)
-        
-        st.write("### Selecciona la página")
-        pagina_firma = st.number_input("Página a firmar:", min_value=1, max_value=num_paginas, value=1)
-        page_info = doc_info[pagina_firma - 1]
-        max_width = float(page_info.rect.width)
-        max_height = float(page_info.rect.height)
-        doc_info.close()
+    tipo_firma = st.radio("Elige el tipo de firma:", ["Firma Visual (Imagen en el documento)", "Firma Digital Criptográfica (.p12 / .pfx)"])
+    
+    if tipo_firma == "Firma Visual (Imagen en el documento)":
+        archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma")
+        if archivo_pdf:
+            pdf_bytes = archivo_pdf.getvalue()
+            doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
+            num_paginas = len(doc_info)
+            
+            st.write("### Selecciona la página")
+            pagina_firma = st.number_input("Página a firmar:", min_value=1, max_value=num_paginas, value=1)
+            page_info = doc_info[pagina_firma - 1]
+            max_width = float(page_info.rect.width)
+            max_height = float(page_info.rect.height)
+            doc_info.close()
 
-        archivo_firma = st.file_uploader("Paso 2: Sube la imagen de tu firma", type=["png", "jpg", "jpeg"], key="img_firma")
-        if archivo_firma:
-            firma_img = Image.open(archivo_firma).convert("RGBA")
-            quitar_fondo = st.checkbox("Quitar fondo blanco de la firma (Hacer transparente)")
-            
-            if quitar_fondo:
-                datas = firma_img.getdata()
-                newData = []
-                for item in datas:
-                    if item[0] > 200 and item[1] > 200 and item[2] > 200: newData.append((255, 255, 255, 0))
-                    else: newData.append(item)
-                firma_img.putdata(newData)
-            
-            img_byte_arr = BytesIO()
-            firma_img.save(img_byte_arr, format='PNG')
-            firma_bytes = img_byte_arr.getvalue()
-            
-            st.write("### Controles de Tamaño y Posición")
-            col_t1, col_t2 = st.columns(2)
-            with col_t1: ancho_firma = st.slider("Ancho de firma", 10.0, 500.0, 150.0, key="firma_ancho")
-            with col_t2: alto_firma = st.slider("Alto de firma", 10.0, 500.0, 50.0, key="firma_alto")
+            archivo_firma = st.file_uploader("Paso 2: Sube la imagen de tu firma", type=["png", "jpg", "jpeg"], key="img_firma")
+            if archivo_firma:
+                firma_img = Image.open(archivo_firma).convert("RGBA")
+                quitar_fondo = st.checkbox("Quitar fondo blanco de la firma")
                 
-            col_p1, col_p2 = st.columns(2)
-            with col_p1: st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
-            with col_p2: st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
+                if quitar_fondo:
+                    datas = firma_img.getdata()
+                    newData = []
+                    for item in datas:
+                        if item[0] > 200 and item[1] > 200 and item[2] > 200: newData.append((255, 255, 255, 0))
+                        else: newData.append(item)
+                    firma_img.putdata(newData)
+                
+                img_byte_arr = BytesIO()
+                firma_img.save(img_byte_arr, format='PNG')
+                firma_bytes = img_byte_arr.getvalue()
+                
+                st.write("### Controles de Tamaño y Posición")
+                col_t1, col_t2 = st.columns(2)
+                with col_t1: ancho_firma = st.slider("Ancho de firma", 10.0, 500.0, 150.0, key="firma_ancho")
+                with col_t2: alto_firma = st.slider("Alto de firma", 10.0, 500.0, 50.0, key="firma_alto")
+                    
+                col_p1, col_p2 = st.columns(2)
+                with col_p1: st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
+                with col_p2: st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
 
-            st.write("### Vista Previa Interactiva (Clic para mover)")
-            doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
-            page_preview = doc_preview[pagina_firma - 1]
-            rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
-            page_preview.insert_image(rect_firma, stream=firma_bytes)
-            
-            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
-            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            coords = streamlit_image_coordinates(img_pil, key="click_firma")
-            if coords is not None:
-                click_id = f"{coords['x']}-{coords['y']}"
-                if st.session_state.last_click_firma != click_id:
-                    st.session_state.last_click_firma = click_id
-                    st.session_state.firma_x = float(coords["x"])
-                    st.session_state.firma_y = float(coords["y"])
-                    st.rerun()
-            doc_preview.close()
-            
-            st.write("### Opciones de Seguridad")
-            bloquear_pdf = st.checkbox("🔒 Bloquear PDF contra modificaciones (Impide que se borre la firma)")
+                st.write("### Vista Previa Interactiva (Clic para mover)")
+                doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
+                page_preview = doc_preview[pagina_firma - 1]
+                rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
+                page_preview.insert_image(rect_firma, stream=firma_bytes)
+                
+                pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+                img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                coords = streamlit_image_coordinates(img_pil, key="click_firma")
+                if coords is not None:
+                    click_id = f"{coords['x']}-{coords['y']}"
+                    if st.session_state.last_click_firma != click_id:
+                        st.session_state.last_click_firma = click_id
+                        st.session_state.firma_x = float(coords["x"])
+                        st.session_state.firma_y = float(coords["y"])
+                        st.rerun()
+                doc_preview.close()
+                
+                st.write("### Opciones de Seguridad")
+                bloquear_pdf = st.checkbox("🔒 Bloquear PDF contra modificaciones (Impide que se borre la firma)")
 
-            if st.button("Aplicar Firma y Descargar"):
-                with st.spinner("Procesando documento final..."):
-                    doc_final = fitz.open(stream=pdf_bytes, filetype="pdf")
-                    page_final = doc_final[pagina_firma - 1]
-                    page_final.insert_image(rect_firma, stream=firma_bytes)
-                    salida_pdf = BytesIO()
-                    if bloquear_pdf:
-                        owner_pw = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
-                        perms = fitz.PDF_PERM_PRINT | fitz.PDF_PERM_ACCESSIBILITY
-                        doc_final.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=owner_pw, permissions=perms)
-                    else:
-                        doc_final.save(salida_pdf)
-                    doc_final.close()
-                    st.success("¡Firma aplicada con éxito!")
-                    st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
+                if st.button("Aplicar Firma y Descargar"):
+                    with st.spinner("Procesando documento final..."):
+                        doc_final = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        page_final = doc_final[pagina_firma - 1]
+                        page_final.insert_image(rect_firma, stream=firma_bytes)
+                        salida_pdf = BytesIO()
+                        if bloquear_pdf:
+                            owner_pw = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                            perms = fitz.PDF_PERM_PRINT | fitz.PDF_PERM_ACCESSIBILITY
+                            doc_final.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=owner_pw, permissions=perms)
+                        else:
+                            doc_final.save(salida_pdf)
+                        doc_final.close()
+                        st.success("¡Firma aplicada con éxito!")
+                        st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
+    
+    else:
+        st.info("Aplica una firma digital con validez legal usando tu certificado PKCS#12 (Invisible).")
+        archivo_pdf = st.file_uploader("1. Sube el PDF a firmar", type=["pdf"], key="pdf_crypto")
+        archivo_p12 = st.file_uploader("2. Sube tu certificado (.p12 o .pfx)", type=["p12", "pfx"])
+        password_p12 = st.text_input("3. Contraseña del certificado", type="password")
+        
+        if archivo_pdf and archivo_p12 and password_p12:
+            if st.button("Procesar Firma Digital"):
+                with st.spinner("Aplicando firma criptográfica..."):
+                    try:
+                        from pyhanko.sign import signers
+                        from pyhanko.pdf_utils.reader import PdfFileReader
+                        from pyhanko.pdf_utils.writer import copy_into_new_writer
+                        
+                        # Cargar el certificado
+                        signer = signers.SimpleSigner.load_pkcs12(
+                            archivo_p12.getvalue(), 
+                            password_p12.encode('utf-8')
+                        )
+                        
+                        pdf_stream = BytesIO(archivo_pdf.getvalue())
+                        reader = PdfFileReader(pdf_stream)
+                        salida_pdf = BytesIO()
+                        
+                        # Firmar el documento
+                        signers.sign_pdf(
+                            copy_into_new_writer(reader),
+                            signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'),
+                            signer=signer,
+                            in_place=False,
+                            out=salida_pdf
+                        )
+                        
+                        st.session_state.pdf_crypto_final = salida_pdf.getvalue()
+                        st.success("¡Firma criptográfica aplicada con éxito! El documento ahora está verificado.")
+                    except Exception as e:
+                        st.error(f"Error al firmar. Verifica la contraseña o asegúrate de que el archivo no esté corrupto. Detalles: {e}")
+            
+            if "pdf_crypto_final" in st.session_state:
+                st.download_button(
+                    label="⬇️ Descargar PDF Firmado Digitalmente", 
+                    data=st.session_state.pdf_crypto_final, 
+                    file_name=f"firmado_digital_{archivo_pdf.name}", 
+                    mime="application/pdf"
+                )
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
@@ -333,7 +382,7 @@ elif opcion == "Editar y Rellenar PDF":
         doc_info.close()
 
 # ==========================================
-# MÓDULO 6: MARCA DE AGUA (NUEVO)
+# MÓDULO 6: MARCA DE AGUA
 # ==========================================
 elif opcion == "Marca de Agua":
     st.header("©️ Insertar Marca de Agua")
@@ -359,11 +408,9 @@ elif opcion == "Marca de Agua":
                     doc_final = fitz.open(stream=pdf_bytes, filetype="pdf")
                     for page in doc_final:
                         rect = page.rect
-                        # Centrar el texto matemáticamente
                         x_center = rect.width / 2 - (len(texto_marca) * size_marca / 4)
                         y_center = rect.height / 2
                         p = fitz.Point(x_center, y_center)
-                        # fill_opacity permite transparencia nativa
                         page.insert_text(p, texto_marca, fontsize=size_marca, color=rgb_color, fill_opacity=opacidad)
                     
                     salida_pdf = BytesIO()
@@ -382,7 +429,6 @@ elif opcion == "Marca de Agua":
                 if st.button("Aplicar Logo como Marca de Agua"):
                     with st.spinner("Procesando..."):
                         img = Image.open(img_marca).convert("RGBA")
-                        # Ajustar opacidad de la imagen
                         alpha = img.split()[3]
                         alpha = ImageEnhance.Brightness(alpha).enhance(opacidad_img)
                         img.putalpha(alpha)
@@ -397,7 +443,6 @@ elif opcion == "Marca de Agua":
                             img_w = (rect.width * escala) / 100
                             img_h = (img.height * img_w) / img.width
                             
-                            # Ubicación central
                             x0 = (rect.width - img_w) / 2
                             y0 = (rect.height - img_h) / 2
                             rect_img = fitz.Rect(x0, y0, x0 + img_w, y0 + img_h)
@@ -411,7 +456,7 @@ elif opcion == "Marca de Agua":
                         st.download_button("Descargar PDF con Logo", data=salida_pdf.getvalue(), file_name=f"logo_agua_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 7: PROTEGER / DESBLOQUEAR (NUEVO)
+# MÓDULO 7: PROTEGER / DESBLOQUEAR
 # ==========================================
 elif opcion == "Proteger / Desbloquear PDF":
     st.header("🔐 Proteger o Desbloquear PDF")
@@ -423,9 +468,6 @@ elif opcion == "Proteger / Desbloquear PDF":
         pdf_bytes = archivo_pdf.getvalue()
         
         if "Proteger" in modo_seguridad:
-            st.write("### Establecer Contraseñas")
-            st.info("💡 **Consejo:** Si solo pones 'Contraseña de Apertura', cualquiera que la sepa podrá editar el PDF. Si pones también una 'Contraseña Maestra', solo tú podrás editarlo o imprimirlo.")
-            
             col1, col2 = st.columns(2)
             with col1: user_pass = st.text_input("Contraseña de Apertura (Para leer):", type="password")
             with col2: owner_pass = st.text_input("Contraseña Maestra (Para editar/imprimir):", type="password")
@@ -441,27 +483,19 @@ elif opcion == "Proteger / Desbloquear PDF":
                 else:
                     with st.spinner("Encriptando documento con AES-256..."):
                         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        
-                        perms = fitz.PDF_PERM_ACCESSIBILITY # Básico requerido siempre
+                        perms = fitz.PDF_PERM_ACCESSIBILITY 
                         if perm_imprimir: perms |= fitz.PDF_PERM_PRINT
                         if perm_copiar: perms |= fitz.PDF_PERM_COPY
                         if perm_editar: perms |= fitz.PDF_PERM_MODIFY
                         
                         salida_pdf = BytesIO()
-                        # Si no hay owner_pass, PyMuPDF requiere usar la user_pass por defecto para cifrar
-                        doc.save(salida_pdf, 
-                                 encryption=fitz.PDF_ENCRYPT_AES_256, 
-                                 user_pw=user_pass, 
-                                 owner_pw=owner_pass if owner_pass else user_pass, 
-                                 permissions=perms)
+                        doc.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=user_pass, owner_pw=owner_pass if owner_pass else user_pass, permissions=perms)
                         doc.close()
                         st.success("¡Documento protegido exitosamente!")
                         st.download_button("Descargar PDF Seguro", data=salida_pdf.getvalue(), file_name=f"protegido_{archivo_pdf.name}", mime="application/pdf")
         
         else:
-            st.write("### Desbloquear Documento")
             pass_actual = st.text_input("Ingresa la contraseña actual del documento:", type="password")
-            
             if st.button("Desbloquear y Descargar"):
                 with st.spinner("Intentando desbloquear..."):
                     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -474,4 +508,70 @@ elif opcion == "Proteger / Desbloquear PDF":
                             st.download_button("Descargar PDF Liberado", data=salida_pdf.getvalue(), file_name=f"desbloqueado_{archivo_pdf.name}", mime="application/pdf")
                         else:
                             st.error("❌ Contraseña incorrecta. El documento sigue bloqueado.")
-                            doc.close
+                            doc.close()
+                    else:
+                        st.warning("Este documento no está protegido por contraseña.")
+                        doc.close()
+
+# ==========================================
+# MÓDULO 8: CONVERTIR ARCHIVOS
+# ==========================================
+elif opcion == "Convertir a Word, Excel, PPT":
+    st.header("🔄 Convertir PDF a Otros Formatos")
+    archivo_pdf = st.file_uploader("Sube tu archivo PDF", type=["pdf"])
+    if archivo_pdf is not None:
+        formato = st.radio("Selecciona el formato:", ["Word (.docx) - Texto editable", "Excel (.xlsx) - Extraer Tablas", "PowerPoint (.pptx) - Presentación visual"])
+        if st.button(f"Convertir a {formato.split(' ')[0]}"):
+            if "Word" in formato:
+                with st.spinner("Convirtiendo a Word..."):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                        tmp_pdf.write(archivo_pdf.getvalue())
+                        ruta_pdf = tmp_pdf.name
+                    ruta_docx = ruta_pdf.replace(".pdf", ".docx")
+                    try:
+                        cv = Converter(ruta_pdf)
+                        cv.convert(ruta_docx, start=0, end=None)
+                        cv.close()
+                        with open(ruta_docx, "rb") as docx_file:
+                            docx_bytes = docx_file.read()
+                        st.success("¡Conversión exitosa!")
+                        st.download_button(label="Descargar Word", data=docx_bytes, file_name=f"{archivo_pdf.name.replace('.pdf', '')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    finally:
+                        if os.path.exists(ruta_pdf): os.remove(ruta_pdf)
+                        if os.path.exists(ruta_docx): os.remove(ruta_docx)
+            elif "Excel" in formato:
+                with st.spinner("Escaneando tablas..."):
+                    try:
+                        todas_las_tablas = []
+                        with pdfplumber.open(BytesIO(archivo_pdf.getvalue())) as pdf:
+                            for page in pdf.pages:
+                                tables = page.extract_tables()
+                                for table in tables:
+                                    if table: 
+                                        df = pd.DataFrame(table[1:], columns=table[0]) if len(table)>1 else pd.DataFrame(table)
+                                        todas_las_tablas.append(df)
+                        if not todas_las_tablas: st.warning("No se detectaron tablas.")
+                        else:
+                            salida_excel = BytesIO()
+                            with pd.ExcelWriter(salida_excel, engine='openpyxl') as writer:
+                                for i, df in enumerate(todas_las_tablas): df.to_excel(writer, sheet_name=f"Tabla_{i+1}", index=False)
+                            st.success(f"¡{len(todas_las_tablas)} tablas extraídas!")
+                            st.download_button(label="Descargar Excel", data=salida_excel.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    except Exception as e: st.error(f"Error al extraer: {e}")
+            elif "PowerPoint" in formato:
+                with st.spinner("Creando diapositivas..."):
+                    try:
+                        prs = Presentation()
+                        blank_slide_layout = prs.slide_layouts[6] 
+                        doc = fitz.open(stream=archivo_pdf.getvalue(), filetype="pdf")
+                        for page_num in range(len(doc)):
+                            page = doc[page_num]
+                            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) 
+                            slide = prs.slides.add_slide(blank_slide_layout)
+                            slide.shapes.add_picture(BytesIO(pix.tobytes("png")), 0, 0, width=prs.slide_width, height=prs.slide_height)
+                        doc.close()
+                        salida_ppt = BytesIO()
+                        prs.save(salida_ppt)
+                        st.success("¡Conversión exitosa!")
+                        st.download_button(label="Descargar PowerPoint", data=salida_ppt.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+                    except Exception as e: st.error(f"Error creando PowerPoint: {e}")
