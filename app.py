@@ -13,7 +13,7 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import fields
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
@@ -151,7 +151,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CORREGIDO)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CON ARCHIVOS FÍSICOS)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -248,38 +248,62 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica en memoria..."):
+                with st.spinner("Procesando firma criptográfica con archivos físicos..."):
+                    ruta_pdf_in = None
+                    ruta_pdf_out = None
+                    ruta_p12 = None
                     try:
-                        p12_bytes = archivo_p12.getvalue()
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # 1. Cargar el certificado
-                        signer = signers.SimpleSigner.load_pkcs12(crypto_data=p12_bytes, key_passphrase=password_bytes)
+                        # 1. Crear archivos físicos temporales para que PyHanko no colapse
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                            tmp_pdf.write(pdf_subido.getvalue())
+                            ruta_pdf_in = tmp_pdf.name
+                            
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
+                            tmp_p12.write(archivo_p12.getvalue())
+                            ruta_p12 = tmp_p12.name
+                            
+                        ruta_pdf_out = ruta_pdf_in.replace(".pdf", "_firmado.pdf")
                         
-                        # 2. Leer PDF con ESCRITOR INCREMENTAL (soluciona el error NoneType)
-                        pdf_stream = BytesIO(pdf_subido.getvalue())
-                        writer = IncrementalPdfFileWriter(pdf_stream)
-                        pdf_salida = BytesIO()
+                        # 2. Cargar el certificado usando la ruta física
+                        signer = signers.SimpleSigner.load_pkcs12(pfx_file=ruta_p12, key_passphrase=password_bytes)
                         
-                        # 3. Aplicar firma usando kwargs explícitos para evitar confusiones de parámetros
-                        signers.sign_pdf(
-                            pdf_out=writer, 
-                            signature_meta=signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
-                            signer=signer, 
-                            in_place=False,
-                            out=pdf_salida
-                        )
+                        # 3. Leer y escribir usando archivos físicos estándar
+                        with open(ruta_pdf_in, 'rb') as f_in:
+                            pdf_reader = PdfFileReader(f_in)
+                            
+                            with open(ruta_pdf_out, 'wb') as f_out:
+                                signers.sign_pdf(
+                                    pdf_reader, 
+                                    signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
+                                    signer=signer, 
+                                    in_place=False,
+                                    out=f_out
+                                )
+                                
+                        # 4. Leer el PDF final resultante para ofrecer la descarga
+                        with open(ruta_pdf_out, "rb") as f_final:
+                            pdf_descarga = f_final.read()
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
                             label="⬇️ Descargar PDF Firmado Digitalmente",
-                            data=pdf_salida.getvalue(),
+                            data=pdf_descarga,
                             file_name=f"firmado_digital_{pdf_subido.name}",
                             mime="application/pdf"
                         )
                         
                     except Exception as e:
-                        st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
+                        st.error(f"Error durante la firma: {e}. Asegúrate de que la contraseña sea correcta.")
+                    finally:
+                        # 5. Limpieza estricta: Eliminar archivos temporales por seguridad
+                        for ruta in [ruta_pdf_in, ruta_p12, ruta_pdf_out]:
+                            if ruta and os.path.exists(ruta):
+                                try:
+                                    os.remove(ruta)
+                                except Exception:
+                                    pass
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
