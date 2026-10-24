@@ -248,9 +248,9 @@ elif opcion == "Firmar PDF":
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
 
         if pdf_subido and archivo_p12 and password_certificado:
-            if st.button("Firmar Documento Digitalmente", type="primary"):
+        if st.button("Firmar Documento Digitalmente", type="primary"):
 
-    with st.spinner("Aplicando firma digital..."):
+           with st.spinner("Aplicando firma digital..."):
 
         import traceback
         from io import BytesIO
