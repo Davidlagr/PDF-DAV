@@ -13,7 +13,7 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
@@ -151,7 +151,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CON ARCHIVOS FÍSICOS)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -248,40 +248,28 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica con archivos físicos..."):
-                    ruta_pdf_in = None
-                    ruta_pdf_out = None
-                    ruta_p12 = None
+                with st.spinner("Inyectando firma criptográfica en memoria..."):
                     try:
+                        p12_bytes = archivo_p12.getvalue()
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-                            tmp_pdf.write(pdf_subido.getvalue())
-                            ruta_pdf_in = tmp_pdf.name
-                            
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
-                            tmp_p12.write(archivo_p12.getvalue())
-                            ruta_p12 = tmp_p12.name
-                            
-                        ruta_pdf_out = ruta_pdf_in.replace(".pdf", "_firmado.pdf")
+                        # 1. Cargar el certificado de manera posicional (sin nombrar las variables)
+                        signer = signers.SimpleSigner.load_pkcs12(p12_bytes, password_bytes)
                         
-                        # SOLUCIÓN: Pasamos los argumentos de forma posicional para evitar conflictos de nombres ('key_passphrase' vs 'passphrase')
-                        signer = signers.SimpleSigner.load_pkcs12(ruta_p12, password_bytes)
+                        # 2. Cargar el PDF en memoria como stream
+                        pdf_stream = BytesIO(pdf_subido.getvalue())
+                        writer = IncrementalPdfFileWriter(pdf_stream)
                         
-                        with open(ruta_pdf_in, 'rb') as f_in:
-                            pdf_reader = PdfFileReader(f_in)
-                            
-                            with open(ruta_pdf_out, 'wb') as f_out:
-                                signers.sign_pdf(
-                                    pdf_reader, 
-                                    signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
-                                    signer=signer, 
-                                    in_place=False,
-                                    out=f_out
-                                )
-                                
-                        with open(ruta_pdf_out, "rb") as f_final:
-                            pdf_descarga = f_final.read()
+                        # 3. Firmar inyectando directamente en el stream original (in_place=True)
+                        signers.sign_pdf(
+                            writer, 
+                            signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
+                            signer, 
+                            in_place=True
+                        )
+                        
+                        # 4. Recuperar los bytes inyectados
+                        pdf_descarga = pdf_stream.getvalue()
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
@@ -293,13 +281,6 @@ elif opcion == "Firmar PDF":
                         
                     except Exception as e:
                         st.error(f"Error durante la firma: {e}. Asegúrate de que la contraseña sea correcta.")
-                    finally:
-                        for ruta in [ruta_pdf_in, ruta_p12, ruta_pdf_out]:
-                            if ruta and os.path.exists(ruta):
-                                try:
-                                    os.remove(ruta)
-                                except Exception:
-                                    pass
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
