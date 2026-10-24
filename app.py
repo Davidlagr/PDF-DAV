@@ -13,7 +13,7 @@ from pptx.util import Inches
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="centered")
 
-# Inicializar variables de estado para guardar las coordenadas de los clics
+# Inicializar variables de estado para guardar las coordenadas
 if "firma_x" not in st.session_state:
     st.session_state.firma_x = 50.0
 if "firma_y" not in st.session_state:
@@ -69,11 +69,10 @@ elif opcion == "Unir y Reorganizar":
     
     if archivos_pdf:
         st.write("### 1. Ordenar Archivos Subidos")
-        st.info("Haz clic en la 'x' para quitar un archivo y vuelve a seleccionarlo en la lista desplegable para ponerlo al final. Se unirán en el orden que aparezcan aquí.")
+        st.info("Haz clic en la 'x' para quitar un archivo y vuelve a seleccionarlo en la lista para ponerlo al final.")
         nombres_archivos = [f.name for f in archivos_pdf]
         orden_archivos = st.multiselect("Orden de los documentos:", options=nombres_archivos, default=nombres_archivos)
         
-        # Mapear nombres de vuelta a los archivos reales
         archivos_ordenados = []
         for name in orden_archivos:
             for f in archivos_pdf:
@@ -114,7 +113,7 @@ elif opcion == "Unir y Reorganizar":
                 )
 
 # ==========================================
-# MÓDULO 3: DIVIDIR O QUITAR HOJAS (Nuevo)
+# MÓDULO 3: DIVIDIR O QUITAR HOJAS
 # ==========================================
 elif opcion == "Dividir o Quitar Hojas":
     st.header("✂️ Dividir o Quitar Hojas de un PDF")
@@ -130,7 +129,6 @@ elif opcion == "Dividir o Quitar Hojas":
         
         if st.button("Procesar Documento"):
             with st.spinner("Procesando páginas..."):
-                # Parsear el input de texto a números de página
                 paginas_seleccionadas = set()
                 for part in paginas_input.split(','):
                     part = part.strip()
@@ -144,7 +142,6 @@ elif opcion == "Dividir o Quitar Hojas":
                             if part: paginas_seleccionadas.add(int(part))
                         except: pass
                 
-                # Convertir a índices base 0
                 idx_seleccionados = sorted([p - 1 for p in paginas_seleccionadas if 1 <= p <= num_paginas])
                 
                 if modo == "Eliminar páginas (Quitar)":
@@ -169,11 +166,11 @@ elif opcion == "Dividir o Quitar Hojas":
                     )
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (Actualizado con quitar fondo)
+# MÓDULO 4: FIRMAR PDF (Con Deslizadores de Arrastre)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
-    st.info("Sube tu documento y tu firma. Haz clic en la vista previa del documento para ubicar la firma.")
+    st.info("💡 **Consejo:** Haz clic en la hoja para acercar la firma, y luego usa los controles deslizantes (X / Y) para 'arrastrarla' exactamente a su lugar.")
     
     archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma")
     
@@ -184,6 +181,10 @@ elif opcion == "Firmar PDF":
         
         st.write("### Selecciona la página")
         pagina_firma = st.number_input("Página a firmar:", min_value=1, max_value=num_paginas, value=1)
+        
+        page_info = doc_info[pagina_firma - 1]
+        max_width = float(page_info.rect.width)
+        max_height = float(page_info.rect.height)
         doc_info.close()
 
         archivo_firma = st.file_uploader("Paso 2: Sube la imagen de tu firma", type=["png", "jpg", "jpeg"], key="img_firma")
@@ -196,26 +197,30 @@ elif opcion == "Firmar PDF":
                 datas = firma_img.getdata()
                 newData = []
                 for item in datas:
-                    # Si el pixel es muy claro/blanco, hacerlo transparente
                     if item[0] > 200 and item[1] > 200 and item[2] > 200:
                         newData.append((255, 255, 255, 0))
                     else:
                         newData.append(item)
                 firma_img.putdata(newData)
             
-            # Convertir imagen PIL a bytes
             img_byte_arr = BytesIO()
             firma_img.save(img_byte_arr, format='PNG')
             firma_bytes = img_byte_arr.getvalue()
             
-            st.write("### Tamaño de la Firma")
-            col_x, col_y = st.columns(2)
-            with col_x:
-                ancho_firma = st.slider("Ancho", 10.0, 500.0, 150.0, key="firma_ancho")
-            with col_y:
-                alto_firma = st.slider("Alto", 10.0, 500.0, 50.0, key="firma_alto")
+            st.write("### Controles de Tamaño y Posición")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                ancho_firma = st.slider("Ancho de firma", 10.0, 500.0, 150.0, key="firma_ancho")
+            with col_t2:
+                alto_firma = st.slider("Alto de firma", 10.0, 500.0, 50.0, key="firma_alto")
+                
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, key="firma_x")
+            with col_p2:
+                st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, key="firma_y")
 
-            st.write("### Haz clic en el documento para colocar tu firma")
+            st.write("### Vista Previa Interactiva (Clic para posicionar rápido)")
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
@@ -226,7 +231,7 @@ elif opcion == "Firmar PDF":
             pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
             img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
-            coords = streamlit_image_coordinates(img_pil, key="coordenadas_firma")
+            coords = streamlit_image_coordinates(img_pil, key="click_firma")
             
             if coords is not None:
                 if coords["x"] != st.session_state.firma_x or coords["y"] != st.session_state.firma_y:
@@ -255,11 +260,11 @@ elif opcion == "Firmar PDF":
                     )
 
 # ==========================================
-# MÓDULO 5: EDITAR Y RELLENAR PDF
+# MÓDULO 5: EDITAR Y RELLENAR PDF (Con Deslizadores)
 # ==========================================
 elif opcion == "Editar y Rellenar PDF":
     st.header("📝 Editar y Rellenar PDF")
-    st.info("Escribe tu texto y haz clic en el documento para ubicarlo.")
+    st.info("💡 **Consejo:** Haz clic en la hoja para ubicar el texto, o usa los controles deslizantes para moverlo con máxima precisión.")
     
     archivo_pdf = st.file_uploader("Sube el PDF a rellenar", type=["pdf"])
     
@@ -270,6 +275,10 @@ elif opcion == "Editar y Rellenar PDF":
         
         pagina_texto = st.number_input("Página:", min_value=1, max_value=num_paginas, value=1)
         texto_insertar = st.text_input("Texto a insertar:", "Escribe tu texto aquí")
+        
+        page_info = doc_info[pagina_texto - 1]
+        max_width = float(page_info.rect.width)
+        max_height = float(page_info.rect.height)
         doc_info.close()
 
         st.write("### Ajustes del Texto")
@@ -279,9 +288,16 @@ elif opcion == "Editar y Rellenar PDF":
         with col_y:
             color_texto = st.color_picker("Color del texto", "#000000")
 
+        st.write("### Controles de Posición")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, key="texto_x")
+        with col_p2:
+            st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, key="texto_y")
+
         rgb_color = tuple(int(color_texto.lstrip('#')[i:i+2], 16)/255 for i in (0, 2, 4))
 
-        st.write("### Haz clic en el documento para colocar el texto")
+        st.write("### Vista Previa Interactiva")
         doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
         page_preview = doc_preview[pagina_texto - 1]
         
@@ -291,7 +307,7 @@ elif opcion == "Editar y Rellenar PDF":
         pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
         img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
-        coords = streamlit_image_coordinates(img_pil, key="coordenadas_texto")
+        coords = streamlit_image_coordinates(img_pil, key="click_texto")
         
         if coords is not None:
             if coords["x"] != st.session_state.texto_x or coords["y"] != st.session_state.texto_y:
@@ -320,7 +336,7 @@ elif opcion == "Editar y Rellenar PDF":
                 )
 
 # ==========================================
-# MÓDULO 6: CONVERTIR ARCHIVOS (Multiformato)
+# MÓDULO 6: CONVERTIR ARCHIVOS
 # ==========================================
 elif opcion == "Convertir a Word, Excel, PPT":
     st.header("🔄 Convertir PDF a Otros Formatos")
@@ -333,9 +349,6 @@ elif opcion == "Convertir a Word, Excel, PPT":
                             "PowerPoint (.pptx) - Presentación visual"])
         
         if st.button(f"Convertir a {formato.split(' ')[0]}"):
-            # -----------------------------------
-            # CONVERSIÓN A WORD
-            # -----------------------------------
             if "Word" in formato:
                 with st.spinner("Convirtiendo a Word... Esto puede tardar."):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
@@ -359,9 +372,6 @@ elif opcion == "Convertir a Word, Excel, PPT":
                         if os.path.exists(ruta_pdf): os.remove(ruta_pdf)
                         if os.path.exists(ruta_docx): os.remove(ruta_docx)
 
-            # -----------------------------------
-            # CONVERSIÓN A EXCEL
-            # -----------------------------------
             elif "Excel" in formato:
                 with st.spinner("Escaneando el documento en busca de tablas..."):
                     try:
@@ -370,7 +380,7 @@ elif opcion == "Convertir a Word, Excel, PPT":
                             for page in pdf.pages:
                                 tables = page.extract_tables()
                                 for table in tables:
-                                    if table: # Si la tabla no está vacía
+                                    if table: 
                                         df = pd.DataFrame(table[1:], columns=table[0]) if len(table)>1 else pd.DataFrame(table)
                                         todas_las_tablas.append(df)
                         
@@ -387,26 +397,19 @@ elif opcion == "Convertir a Word, Excel, PPT":
                     except Exception as e:
                         st.error(f"Error al extraer tablas: {e}")
 
-            # -----------------------------------
-            # CONVERSIÓN A POWERPOINT
-            # -----------------------------------
             elif "PowerPoint" in formato:
                 with st.spinner("Creando diapositivas a partir del PDF..."):
                     try:
                         prs = Presentation()
-                        # Usar un diseño de diapositiva en blanco
                         blank_slide_layout = prs.slide_layouts[6] 
                         
                         doc = fitz.open(stream=archivo_pdf.getvalue(), filetype="pdf")
                         for page_num in range(len(doc)):
                             page = doc[page_num]
-                            # Renderizar página como imagen de alta calidad
                             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) 
                             img_data = pix.tobytes("png")
                             
                             slide = prs.slides.add_slide(blank_slide_layout)
-                            
-                            # Insertar imagen llenando la diapositiva
                             img_stream = BytesIO(img_data)
                             slide.shapes.add_picture(img_stream, 0, 0, width=prs.slide_width, height=prs.slide_height)
                             
