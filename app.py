@@ -3,6 +3,8 @@ import fitz  # PyMuPDF
 from pdf2docx import Converter
 import tempfile
 import os
+import random
+import string
 from io import BytesIO
 from PIL import Image
 from streamlit_image_coordinates import streamlit_image_coordinates
@@ -13,15 +15,24 @@ from pptx.util import Inches
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="centered")
 
-# Inicializar variables de estado para guardar las coordenadas
-if "firma_x" not in st.session_state:
-    st.session_state.firma_x = 50.0
-if "firma_y" not in st.session_state:
-    st.session_state.firma_y = 50.0
-if "texto_x" not in st.session_state:
-    st.session_state.texto_x = 50.0
-if "texto_y" not in st.session_state:
-    st.session_state.texto_y = 50.0
+# Inicializar variables de estado seguras para evitar conflictos entre clics y sliders
+if "firma_x" not in st.session_state: st.session_state.firma_x = 50.0
+if "firma_y" not in st.session_state: st.session_state.firma_y = 50.0
+if "last_click_firma" not in st.session_state: st.session_state.last_click_firma = None
+
+if "texto_x" not in st.session_state: st.session_state.texto_x = 50.0
+if "texto_y" not in st.session_state: st.session_state.texto_y = 50.0
+if "last_click_texto" not in st.session_state: st.session_state.last_click_texto = None
+
+# Funciones de sincronización para los sliders
+def update_firma_pos():
+    st.session_state.firma_x = st.session_state.slider_firma_x
+    st.session_state.firma_y = st.session_state.slider_firma_y
+
+def update_texto_pos():
+    st.session_state.texto_x = st.session_state.slider_texto_x
+    st.session_state.texto_y = st.session_state.slider_texto_y
+
 
 st.sidebar.title("Módulos PDF")
 opcion = st.sidebar.radio("Selecciona una herramienta:", 
@@ -41,24 +52,15 @@ if opcion == "Comprimir PDF":
     
     if archivo_pdf is not None:
         nivel = st.radio("Nivel de compresión:", ["Medio (Buena calidad)", "Máximo (Calidad media)"])
-        
         if st.button("Comprimir"):
             with st.spinner("Comprimiendo..."):
                 doc = fitz.open(stream=archivo_pdf.getvalue(), filetype="pdf")
-                
                 garbage_level = 3 if nivel == "Medio (Buena calidad)" else 4
-                
                 salida_pdf = BytesIO()
                 doc.save(salida_pdf, garbage=garbage_level, deflate=True)
                 doc.close()
-                
                 st.success("¡Compresión finalizada!")
-                st.download_button(
-                    label="Descargar PDF Comprimido",
-                    data=salida_pdf.getvalue(),
-                    file_name=f"comprimido_{archivo_pdf.name}",
-                    mime="application/pdf"
-                )
+                st.download_button(label="Descargar PDF Comprimido", data=salida_pdf.getvalue(), file_name=f"comprimido_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
 # MÓDULO 2: UNIR Y REORGANIZAR
@@ -69,7 +71,6 @@ elif opcion == "Unir y Reorganizar":
     
     if archivos_pdf:
         st.write("### 1. Ordenar Archivos Subidos")
-        st.info("Haz clic en la 'x' para quitar un archivo y vuelve a seleccionarlo en la lista para ponerlo al final.")
         nombres_archivos = [f.name for f in archivos_pdf]
         orden_archivos = st.multiselect("Orden de los documentos:", options=nombres_archivos, default=nombres_archivos)
         
@@ -86,7 +87,6 @@ elif opcion == "Unir y Reorganizar":
         if st.button("Unir y Procesar"):
             with st.spinner("Uniendo documentos..."):
                 doc_final = fitz.open()
-                
                 for pdf_file in archivos_ordenados:
                     doc_temp = fitz.open(stream=pdf_file.getvalue(), filetype="pdf")
                     doc_final.insert_pdf(doc_temp)
@@ -96,21 +96,15 @@ elif opcion == "Unir y Reorganizar":
                     try:
                         nuevo_orden = [int(x.strip()) - 1 for x in orden_hojas.split(",")]
                         doc_final.select(nuevo_orden)
-                    except Exception as e:
-                        st.error(f"Error en el formato de orden: {e}. Asegúrate de usar números separados por comas.")
+                    except:
+                        st.error("Error en el formato de orden.")
                         st.stop()
                 
                 salida_pdf = BytesIO()
                 doc_final.save(salida_pdf)
                 doc_final.close()
-                
                 st.success("¡Documento procesado!")
-                st.download_button(
-                    label="Descargar PDF Unido",
-                    data=salida_pdf.getvalue(),
-                    file_name="documento_unido.pdf",
-                    mime="application/pdf"
-                )
+                st.download_button(label="Descargar PDF Unido", data=salida_pdf.getvalue(), file_name="documento_unido.pdf", mime="application/pdf")
 
 # ==========================================
 # MÓDULO 3: DIVIDIR O QUITAR HOJAS
@@ -143,34 +137,24 @@ elif opcion == "Dividir o Quitar Hojas":
                         except: pass
                 
                 idx_seleccionados = sorted([p - 1 for p in paginas_seleccionadas if 1 <= p <= num_paginas])
-                
-                if modo == "Eliminar páginas (Quitar)":
-                    idx_finales = [i for i in range(num_paginas) if i not in idx_seleccionados]
-                else:
-                    idx_finales = idx_seleccionados
+                idx_finales = [i for i in range(num_paginas) if i not in idx_seleccionados] if modo == "Eliminar páginas (Quitar)" else idx_seleccionados
                 
                 if not idx_finales:
-                    st.error("La selección dejó el documento sin páginas. Intenta con otros números.")
+                    st.error("La selección dejó el documento sin páginas.")
                 else:
                     doc.select(idx_finales)
                     salida_pdf = BytesIO()
                     doc.save(salida_pdf)
                     doc.close()
-                    
                     st.success("¡Páginas procesadas con éxito!")
-                    st.download_button(
-                        label="Descargar PDF Modificado",
-                        data=salida_pdf.getvalue(),
-                        file_name=f"modificado_{archivo_pdf.name}",
-                        mime="application/pdf"
-                    )
+                    st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (Con Deslizadores de Arrastre)
+# MÓDULO 4: FIRMAR PDF (Con Seguridad y Clic Corregido)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
-    st.info("💡 **Consejo:** Haz clic en la hoja para acercar la firma, y luego usa los controles deslizantes (X / Y) para 'arrastrarla' exactamente a su lugar.")
+    st.info("Haz clic en cualquier parte de la vista previa para enviar la firma allí, o arrastra los controles deslizantes.")
     
     archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma")
     
@@ -216,11 +200,11 @@ elif opcion == "Firmar PDF":
                 
             col_p1, col_p2 = st.columns(2)
             with col_p1:
-                st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, key="firma_x")
+                st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
             with col_p2:
-                st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, key="firma_y")
+                st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
 
-            st.write("### Vista Previa Interactiva (Clic para posicionar rápido)")
+            st.write("### Vista Previa Interactiva (Clic para mover)")
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
@@ -231,16 +215,22 @@ elif opcion == "Firmar PDF":
             pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
             img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
+            # Capturar Clic del mouse
             coords = streamlit_image_coordinates(img_pil, key="click_firma")
-            
             if coords is not None:
-                if coords["x"] != st.session_state.firma_x or coords["y"] != st.session_state.firma_y:
+                click_id = f"{coords['x']}-{coords['y']}"
+                # Solo actualizar si es un clic NUEVO (evita re-renders infinitos o bloqueos del slider)
+                if st.session_state.last_click_firma != click_id:
+                    st.session_state.last_click_firma = click_id
                     st.session_state.firma_x = float(coords["x"])
                     st.session_state.firma_y = float(coords["y"])
                     st.rerun()
 
             doc_preview.close()
             
+            st.write("### Opciones de Seguridad")
+            bloquear_pdf = st.checkbox("🔒 Bloquear PDF contra modificaciones (Impide que se borre la firma)")
+
             if st.button("Aplicar Firma y Descargar"):
                 with st.spinner("Procesando documento final..."):
                     doc_final = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -248,23 +238,27 @@ elif opcion == "Firmar PDF":
                     page_final.insert_image(rect_firma, stream=firma_bytes)
                     
                     salida_pdf = BytesIO()
-                    doc_final.save(salida_pdf)
+                    
+                    # Aplicar protección si el usuario lo marcó
+                    if bloquear_pdf:
+                        # Genera una contraseña aleatoria de propietario para que nadie pueda desbloquearlo
+                        owner_pw = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                        # Permisos: Solo permitir impresión y accesibilidad (Evita modificar/copiar)
+                        perms = fitz.PDF_PERM_PRINT | fitz.PDF_PERM_ACCESSIBILITY
+                        doc_final.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=owner_pw, permissions=perms)
+                    else:
+                        doc_final.save(salida_pdf)
+                        
                     doc_final.close()
                     
                     st.success("¡Firma aplicada con éxito!")
-                    st.download_button(
-                        label="Descargar PDF Firmado",
-                        data=salida_pdf.getvalue(),
-                        file_name=f"firmado_{archivo_pdf.name}",
-                        mime="application/pdf"
-                    )
+                    st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 5: EDITAR Y RELLENAR PDF (Con Deslizadores)
+# MÓDULO 5: EDITAR Y RELLENAR PDF
 # ==========================================
 elif opcion == "Editar y Rellenar PDF":
     st.header("📝 Editar y Rellenar PDF")
-    st.info("💡 **Consejo:** Haz clic en la hoja para ubicar el texto, o usa los controles deslizantes para moverlo con máxima precisión.")
     
     archivo_pdf = st.file_uploader("Sube el PDF a rellenar", type=["pdf"])
     
@@ -291,13 +285,13 @@ elif opcion == "Editar y Rellenar PDF":
         st.write("### Controles de Posición")
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, key="texto_x")
+            st.slider("Arrastrar Horizontalmente (X)", 0.0, max_width, value=st.session_state.texto_x, key="slider_texto_x", on_change=update_texto_pos)
         with col_p2:
-            st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, key="texto_y")
+            st.slider("Arrastrar Verticalmente (Y)", 0.0, max_height, value=st.session_state.texto_y, key="slider_texto_y", on_change=update_texto_pos)
 
         rgb_color = tuple(int(color_texto.lstrip('#')[i:i+2], 16)/255 for i in (0, 2, 4))
 
-        st.write("### Vista Previa Interactiva")
+        st.write("### Vista Previa Interactiva (Clic para mover)")
         doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
         page_preview = doc_preview[pagina_texto - 1]
         
@@ -307,10 +301,12 @@ elif opcion == "Editar y Rellenar PDF":
         pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
         img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
+        # Captura de Clic corregida
         coords = streamlit_image_coordinates(img_pil, key="click_texto")
-        
         if coords is not None:
-            if coords["x"] != st.session_state.texto_x or coords["y"] != st.session_state.texto_y:
+            click_id = f"{coords['x']}-{coords['y']}"
+            if st.session_state.last_click_texto != click_id:
+                st.session_state.last_click_texto = click_id
                 st.session_state.texto_x = float(coords["x"])
                 st.session_state.texto_y = float(coords["y"])
                 st.rerun()
@@ -326,14 +322,8 @@ elif opcion == "Editar y Rellenar PDF":
                 salida_pdf = BytesIO()
                 doc_final.save(salida_pdf)
                 doc_final.close()
-                
                 st.success("¡Texto aplicado con éxito!")
-                st.download_button(
-                    label="Descargar PDF Rellenado",
-                    data=salida_pdf.getvalue(),
-                    file_name=f"rellenado_{archivo_pdf.name}",
-                    mime="application/pdf"
-                )
+                st.download_button(label="Descargar PDF Rellenado", data=salida_pdf.getvalue(), file_name=f"rellenado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
 # MÓDULO 6: CONVERTIR ARCHIVOS
@@ -343,14 +333,11 @@ elif opcion == "Convertir a Word, Excel, PPT":
     archivo_pdf = st.file_uploader("Sube tu archivo PDF", type=["pdf"])
     
     if archivo_pdf is not None:
-        formato = st.radio("Selecciona el formato al que deseas convertir:", 
-                           ["Word (.docx) - Texto editable", 
-                            "Excel (.xlsx) - Extraer Tablas", 
-                            "PowerPoint (.pptx) - Presentación visual"])
+        formato = st.radio("Selecciona el formato:", ["Word (.docx) - Texto editable", "Excel (.xlsx) - Extraer Tablas", "PowerPoint (.pptx) - Presentación visual"])
         
         if st.button(f"Convertir a {formato.split(' ')[0]}"):
             if "Word" in formato:
-                with st.spinner("Convirtiendo a Word... Esto puede tardar."):
+                with st.spinner("Convirtiendo a Word..."):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
                         tmp_pdf.write(archivo_pdf.getvalue())
                         ruta_pdf = tmp_pdf.name
@@ -360,20 +347,16 @@ elif opcion == "Convertir a Word, Excel, PPT":
                         cv = Converter(ruta_pdf)
                         cv.convert(ruta_docx, start=0, end=None)
                         cv.close()
-                        
                         with open(ruta_docx, "rb") as docx_file:
                             docx_bytes = docx_file.read()
-                            
-                        st.success("¡Conversión a Word exitosa!")
+                        st.success("¡Conversión exitosa!")
                         st.download_button(label="Descargar Word", data=docx_bytes, file_name=f"{archivo_pdf.name.replace('.pdf', '')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                    except Exception as e:
-                        st.error(f"Error durante la conversión: {e}")
                     finally:
                         if os.path.exists(ruta_pdf): os.remove(ruta_pdf)
                         if os.path.exists(ruta_docx): os.remove(ruta_docx)
 
             elif "Excel" in formato:
-                with st.spinner("Escaneando el documento en busca de tablas..."):
+                with st.spinner("Escaneando tablas..."):
                     try:
                         todas_las_tablas = []
                         with pdfplumber.open(BytesIO(archivo_pdf.getvalue())) as pdf:
@@ -383,42 +366,32 @@ elif opcion == "Convertir a Word, Excel, PPT":
                                     if table: 
                                         df = pd.DataFrame(table[1:], columns=table[0]) if len(table)>1 else pd.DataFrame(table)
                                         todas_las_tablas.append(df)
-                        
                         if not todas_las_tablas:
-                            st.warning("No se encontraron tablas detectables en este PDF.")
+                            st.warning("No se detectaron tablas.")
                         else:
                             salida_excel = BytesIO()
                             with pd.ExcelWriter(salida_excel, engine='openpyxl') as writer:
-                                for i, df in enumerate(todas_las_tablas):
-                                    df.to_excel(writer, sheet_name=f"Tabla_{i+1}", index=False)
-                            
-                            st.success(f"¡Se extrajeron {len(todas_las_tablas)} tablas con éxito!")
+                                for i, df in enumerate(todas_las_tablas): df.to_excel(writer, sheet_name=f"Tabla_{i+1}", index=False)
+                            st.success(f"¡{len(todas_las_tablas)} tablas extraídas!")
                             st.download_button(label="Descargar Excel", data=salida_excel.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     except Exception as e:
-                        st.error(f"Error al extraer tablas: {e}")
+                        st.error(f"Error al extraer: {e}")
 
             elif "PowerPoint" in formato:
-                with st.spinner("Creando diapositivas a partir del PDF..."):
+                with st.spinner("Creando diapositivas..."):
                     try:
                         prs = Presentation()
                         blank_slide_layout = prs.slide_layouts[6] 
-                        
                         doc = fitz.open(stream=archivo_pdf.getvalue(), filetype="pdf")
                         for page_num in range(len(doc)):
                             page = doc[page_num]
                             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) 
-                            img_data = pix.tobytes("png")
-                            
                             slide = prs.slides.add_slide(blank_slide_layout)
-                            img_stream = BytesIO(img_data)
-                            slide.shapes.add_picture(img_stream, 0, 0, width=prs.slide_width, height=prs.slide_height)
-                            
+                            slide.shapes.add_picture(BytesIO(pix.tobytes("png")), 0, 0, width=prs.slide_width, height=prs.slide_height)
                         doc.close()
-                        
                         salida_ppt = BytesIO()
                         prs.save(salida_ppt)
-                        
-                        st.success("¡Conversión a PowerPoint exitosa!")
+                        st.success("¡Conversión exitosa!")
                         st.download_button(label="Descargar PowerPoint", data=salida_ppt.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
                     except Exception as e:
-                        st.error(f"Error creando el PowerPoint: {e}")
+                        st.error(f"Error creando PowerPoint: {e}")
