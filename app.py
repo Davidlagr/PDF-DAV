@@ -13,7 +13,7 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.sign import fields
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
@@ -151,7 +151,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL MEMORIA)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL NATIVO)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -248,36 +248,48 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica 100% en memoria..."):
+                with st.spinner("Procesando firma con motor criptográfico nativo..."):
                     try:
+                        from cryptography.hazmat.primitives.serialization import pkcs12
+                        
                         p12_bytes = archivo_p12.getvalue()
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # 1. Cargar el certificado pasando los bytes directamente (evita 'embedded null byte')
-                        signer = signers.SimpleSigner.load_pkcs12(p12_bytes, password_bytes)
+                        # 1. BYPASS PYHANKO: Leemos el certificado con la librería nativa
+                        private_key, certificate, additional_certificates = pkcs12.load_key_and_certificates(
+                            p12_bytes, password_bytes
+                        )
                         
-                        # 2. Mantener el PDF en memoria 
+                        # 2. Creamos el firmante manualmente entregando las llaves "desempacadas"
+                        signer = signers.SimpleSigner(
+                            signing_cert=certificate,
+                            signing_key=private_key,
+                            cert_registry=signers.SimpleCertificateStore()
+                        )
+                        
+                        # 3. Leer y preparar el PDF
                         pdf_stream = BytesIO(pdf_subido.getvalue())
-                        writer = IncrementalPdfFileWriter(pdf_stream)
+                        pdf_reader = PdfFileReader(pdf_stream)
+                        pdf_salida = BytesIO()
                         
-                        # 3. Firmar inyectando directamente en el mismo stream (evita error 'out')
+                        # 4. Firmar el documento
                         signers.sign_pdf(
-                            writer, 
+                            pdf_reader, 
                             signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
                             signer, 
-                            in_place=True
+                            out=pdf_salida
                         )
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
                             label="⬇️ Descargar PDF Firmado Digitalmente",
-                            data=pdf_stream.getvalue(),
+                            data=pdf_salida.getvalue(),
                             file_name=f"firmado_digital_{pdf_subido.name}",
                             mime="application/pdf"
                         )
                         
                     except Exception as e:
-                        st.error(f"Error durante la firma: {e}. Asegúrate de que la contraseña sea correcta.")
+                        st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
