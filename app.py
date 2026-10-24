@@ -13,7 +13,7 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
@@ -248,30 +248,26 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica..."):
-                    ruta_tmp_p12 = None
+                with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
+                        p12_bytes = archivo_p12.getvalue()
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # SOLUCIÓN: Guardar el certificado en un archivo físico temporal para pyhanko
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
-                            tmp_p12.write(archivo_p12.getvalue())
-                            ruta_tmp_p12 = tmp_p12.name
-                            
-                        # Cargar el certificado usando la ruta física
-                        signer = signers.SimpleSigner.load_pkcs12(ruta_tmp_p12, password_bytes)
+                        # 1. Cargar el certificado
+                        signer = signers.SimpleSigner.load_pkcs12(crypto_data=p12_bytes, key_passphrase=password_bytes)
                         
-                        # Leer PDF y preparar salida
+                        # 2. Leer PDF con ESCRITOR INCREMENTAL (soluciona el error NoneType)
                         pdf_stream = BytesIO(pdf_subido.getvalue())
-                        pdf_reader = PdfFileReader(pdf_stream)
+                        writer = IncrementalPdfFileWriter(pdf_stream)
                         pdf_salida = BytesIO()
                         
-                        # Aplicar firma digital
+                        # 3. Aplicar firma usando kwargs explícitos para evitar confusiones de parámetros
                         signers.sign_pdf(
-                            pdf_reader, 
-                            signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
-                            signer, 
-                            pdf_salida
+                            pdf_out=writer, 
+                            signature_meta=signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
+                            signer=signer, 
+                            in_place=False,
+                            out=pdf_salida
                         )
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
@@ -284,10 +280,6 @@ elif opcion == "Firmar PDF":
                         
                     except Exception as e:
                         st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
-                    finally:
-                        # Limpiar el archivo temporal por seguridad
-                        if ruta_tmp_p12 and os.path.exists(ruta_tmp_p12):
-                            os.remove(ruta_tmp_p12)
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
@@ -489,100 +481,3 @@ elif opcion == "Proteger / Desbloquear PDF":
             perm_editar = st.checkbox("Permitir Modificar el Documento", value=False)
             
             if st.button("Proteger y Descargar"):
-                if not user_pass and not owner_pass:
-                    st.error("Debes ingresar al menos una contraseña.")
-                else:
-                    with st.spinner("Encriptando documento con AES-256..."):
-                        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        perms = fitz.PDF_PERM_ACCESSIBILITY 
-                        if perm_imprimir: perms |= fitz.PDF_PERM_PRINT
-                        if perm_copiar: perms |= fitz.PDF_PERM_COPY
-                        if perm_editar: perms |= fitz.PDF_PERM_MODIFY
-                        
-                        salida_pdf = BytesIO()
-                        doc.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=user_pass, owner_pw=owner_pass if owner_pass else user_pass, permissions=perms)
-                        doc.close()
-                        st.success("¡Documento protegido exitosamente!")
-                        st.download_button("Descargar PDF Seguro", data=salida_pdf.getvalue(), file_name=f"protegido_{archivo_pdf.name}", mime="application/pdf")
-        
-        else:
-            pass_actual = st.text_input("Ingresa la contraseña actual del documento:", type="password")
-            if st.button("Desbloquear y Descargar"):
-                with st.spinner("Intentando desbloquear..."):
-                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                    if doc.is_encrypted:
-                        if doc.authenticate(pass_actual):
-                            salida_pdf = BytesIO()
-                            doc.save(salida_pdf, encryption=fitz.PDF_ENCRYPT_NONE)
-                            doc.close()
-                            st.success("¡Documento desbloqueado exitosamente!")
-                            st.download_button("Descargar PDF Liberado", data=salida_pdf.getvalue(), file_name=f"desbloqueado_{archivo_pdf.name}", mime="application/pdf")
-                        else:
-                            st.error("❌ Contraseña incorrecta. El documento sigue bloqueado.")
-                            doc.close()
-                    else:
-                        st.warning("Este documento no está protegido por contraseña.")
-                        doc.close()
-
-# ==========================================
-# MÓDULO 8: CONVERTIR ARCHIVOS
-# ==========================================
-elif opcion == "Convertir a Word, Excel, PPT":
-    st.header("🔄 Convertir PDF a Otros Formatos")
-    archivo_pdf = st.file_uploader("Sube tu archivo PDF", type=["pdf"])
-    if archivo_pdf is not None:
-        formato = st.radio("Selecciona el formato:", ["Word (.docx) - Texto editable", "Excel (.xlsx) - Extraer Tablas", "PowerPoint (.pptx) - Presentación visual"])
-        if st.button(f"Convertir a {formato.split(' ')[0]}"):
-            if "Word" in formato:
-                with st.spinner("Convirtiendo a Word..."):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-                        tmp_pdf.write(archivo_pdf.getvalue())
-                        ruta_pdf = tmp_pdf.name
-                    ruta_docx = ruta_pdf.replace(".pdf", ".docx")
-                    try:
-                        cv = Converter(ruta_pdf)
-                        cv.convert(ruta_docx, start=0, end=None)
-                        cv.close()
-                        with open(ruta_docx, "rb") as docx_file:
-                            docx_bytes = docx_file.read()
-                        st.success("¡Conversión exitosa!")
-                        st.download_button(label="Descargar Word", data=docx_bytes, file_name=f"{archivo_pdf.name.replace('.pdf', '')}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                    finally:
-                        if os.path.exists(ruta_pdf): os.remove(ruta_pdf)
-                        if os.path.exists(ruta_docx): os.remove(ruta_docx)
-            elif "Excel" in formato:
-                with st.spinner("Escaneando tablas..."):
-                    try:
-                        todas_las_tablas = []
-                        with pdfplumber.open(BytesIO(archivo_pdf.getvalue())) as pdf:
-                            for page in pdf.pages:
-                                tables = page.extract_tables()
-                                for table in tables:
-                                    if table: 
-                                        df = pd.DataFrame(table[1:], columns=table[0]) if len(table)>1 else pd.DataFrame(table)
-                                        todas_las_tablas.append(df)
-                        if not todas_las_tablas: st.warning("No se detectaron tablas.")
-                        else:
-                            salida_excel = BytesIO()
-                            with pd.ExcelWriter(salida_excel, engine='openpyxl') as writer:
-                                for i, df in enumerate(todas_las_tablas): df.to_excel(writer, sheet_name=f"Tabla_{i+1}", index=False)
-                            st.success(f"¡{len(todas_las_tablas)} tablas extraídas!")
-                            st.download_button(label="Descargar Excel", data=salida_excel.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                    except Exception as e: st.error(f"Error al extraer: {e}")
-            elif "PowerPoint" in formato:
-                with st.spinner("Creando diapositivas..."):
-                    try:
-                        prs = Presentation()
-                        blank_slide_layout = prs.slide_layouts[6] 
-                        doc = fitz.open(stream=archivo_pdf.getvalue(), filetype="pdf")
-                        for page_num in range(len(doc)):
-                            page = doc[page_num]
-                            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) 
-                            slide = prs.slides.add_slide(blank_slide_layout)
-                            slide.shapes.add_picture(BytesIO(pix.tobytes("png")), 0, 0, width=prs.slide_width, height=prs.slide_height)
-                        doc.close()
-                        salida_ppt = BytesIO()
-                        prs.save(salida_ppt)
-                        st.success("¡Conversión exitosa!")
-                        st.download_button(label="Descargar PowerPoint", data=salida_ppt.getvalue(), file_name=f"{archivo_pdf.name.replace('.pdf', '')}.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                    except Exception as e: st.error(f"Error creando PowerPoint: {e}")
