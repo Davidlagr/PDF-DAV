@@ -255,7 +255,6 @@ elif opcion == "Firmar PDF":
                     try:
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # 1. Crear archivos físicos temporales para que PyHanko no colapse
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
                             tmp_pdf.write(pdf_subido.getvalue())
                             ruta_pdf_in = tmp_pdf.name
@@ -266,10 +265,9 @@ elif opcion == "Firmar PDF":
                             
                         ruta_pdf_out = ruta_pdf_in.replace(".pdf", "_firmado.pdf")
                         
-                        # 2. Cargar el certificado usando la ruta física
-                        signer = signers.SimpleSigner.load_pkcs12(pfx_file=ruta_p12, key_passphrase=password_bytes)
+                        # SOLUCIÓN: Pasamos los argumentos de forma posicional para evitar conflictos de nombres ('key_passphrase' vs 'passphrase')
+                        signer = signers.SimpleSigner.load_pkcs12(ruta_p12, password_bytes)
                         
-                        # 3. Leer y escribir usando archivos físicos estándar
                         with open(ruta_pdf_in, 'rb') as f_in:
                             pdf_reader = PdfFileReader(f_in)
                             
@@ -282,7 +280,6 @@ elif opcion == "Firmar PDF":
                                     out=f_out
                                 )
                                 
-                        # 4. Leer el PDF final resultante para ofrecer la descarga
                         with open(ruta_pdf_out, "rb") as f_final:
                             pdf_descarga = f_final.read()
                         
@@ -297,7 +294,6 @@ elif opcion == "Firmar PDF":
                     except Exception as e:
                         st.error(f"Error durante la firma: {e}. Asegúrate de que la contraseña sea correcta.")
                     finally:
-                        # 5. Limpieza estricta: Eliminar archivos temporales por seguridad
                         for ruta in [ruta_pdf_in, ruta_p12, ruta_pdf_out]:
                             if ruta and os.path.exists(ruta):
                                 try:
