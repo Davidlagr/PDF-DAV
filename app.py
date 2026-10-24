@@ -251,8 +251,13 @@ elif opcion == "Firmar PDF":
                 with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
                         password_bytes = password_certificado.encode('utf-8')
-                        signer = signers.SimpleSigner.load_pkcs12(archivo_p12.getvalue(), password_bytes)
-                        pdf_reader = PdfFileReader(pdf_subido)
+                        
+                        # CORRECCIÓN: Envolver en BytesIO para que no lo confunda con una ruta de archivo
+                        p12_stream = BytesIO(archivo_p12.getvalue())
+                        pdf_stream = BytesIO(pdf_subido.getvalue())
+                        
+                        signer = signers.SimpleSigner.load_pkcs12(p12_stream, password_bytes)
+                        pdf_reader = PdfFileReader(pdf_stream)
                         pdf_salida = BytesIO()
                         
                         signers.sign_pdf(
@@ -271,7 +276,7 @@ elif opcion == "Firmar PDF":
                         )
                         
                     except Exception as e:
-                        st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta y el archivo no esté corrupto.")
+                        st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
