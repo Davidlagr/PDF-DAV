@@ -13,8 +13,9 @@ import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.reader import PdfFileReader
-from pyhanko.sign import fields
+from pyhanko.pdf_utils.incremental_writer import (
+    IncrementalPdfFileWriter
+)
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
 
