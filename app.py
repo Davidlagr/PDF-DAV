@@ -151,7 +151,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL COMBINADO)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -248,19 +248,24 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Inyectando firma criptográfica en memoria..."):
+                with st.spinner("Procesando firma criptográfica..."):
+                    ruta_p12 = None
                     try:
-                        p12_bytes = archivo_p12.getvalue()
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # 1. Cargar el certificado de manera posicional (sin nombrar las variables)
-                        signer = signers.SimpleSigner.load_pkcs12(p12_bytes, password_bytes)
+                        # 1. Guardar SOLO el certificado en un archivo temporal (evita el 'embedded null byte')
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
+                            tmp_p12.write(archivo_p12.getvalue())
+                            ruta_p12 = tmp_p12.name
+                            
+                        # 2. Cargar el certificado usando la ruta física
+                        signer = signers.SimpleSigner.load_pkcs12(ruta_p12, password_bytes)
                         
-                        # 2. Cargar el PDF en memoria como stream
+                        # 3. Mantener el PDF en memoria para inyectar la firma sin crear archivos extra
                         pdf_stream = BytesIO(pdf_subido.getvalue())
                         writer = IncrementalPdfFileWriter(pdf_stream)
                         
-                        # 3. Firmar inyectando directamente en el stream original (in_place=True)
+                        # 4. Firmar inyectando in_place=True (evita el error de variable 'out')
                         signers.sign_pdf(
                             writer, 
                             signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
@@ -268,7 +273,7 @@ elif opcion == "Firmar PDF":
                             in_place=True
                         )
                         
-                        # 4. Recuperar los bytes inyectados
+                        # 5. Obtener el archivo firmado final desde la memoria
                         pdf_descarga = pdf_stream.getvalue()
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
@@ -281,6 +286,13 @@ elif opcion == "Firmar PDF":
                         
                     except Exception as e:
                         st.error(f"Error durante la firma: {e}. Asegúrate de que la contraseña sea correcta.")
+                    finally:
+                        # Limpiar el rastro del archivo temporal por seguridad
+                        if ruta_p12 and os.path.exists(ruta_p12):
+                            try:
+                                os.remove(ruta_p12)
+                            except Exception:
+                                pass
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
