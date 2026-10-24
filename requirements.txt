@@ -3,3 +3,7 @@ PyMuPDF
 pdf2docx
 Pillow
 streamlit-image-coordinates
+pdfplumber
+pandas
+openpyxl
+python-pptx
