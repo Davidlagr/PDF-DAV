@@ -7,3 +7,4 @@ pdfplumber
 pandas
 openpyxl
 python-pptx
+pyhanko
