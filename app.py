@@ -151,7 +151,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CORREGIDO)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -248,21 +248,28 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica en memoria..."):
+                with st.spinner("Procesando firma criptográfica..."):
+                    ruta_tmp_p12 = None
                     try:
                         password_bytes = password_certificado.encode('utf-8')
                         
-                        # CORRECCIÓN: Envolver en BytesIO para que no lo confunda con una ruta de archivo
-                        p12_stream = BytesIO(archivo_p12.getvalue())
-                        pdf_stream = BytesIO(pdf_subido.getvalue())
+                        # SOLUCIÓN: Guardar el certificado en un archivo físico temporal para pyhanko
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
+                            tmp_p12.write(archivo_p12.getvalue())
+                            ruta_tmp_p12 = tmp_p12.name
+                            
+                        # Cargar el certificado usando la ruta física
+                        signer = signers.SimpleSigner.load_pkcs12(ruta_tmp_p12, password_bytes)
                         
-                        signer = signers.SimpleSigner.load_pkcs12(p12_stream, password_bytes)
+                        # Leer PDF y preparar salida
+                        pdf_stream = BytesIO(pdf_subido.getvalue())
                         pdf_reader = PdfFileReader(pdf_stream)
                         pdf_salida = BytesIO()
                         
+                        # Aplicar firma digital
                         signers.sign_pdf(
                             pdf_reader, 
-                            signers.PdfSignatureMetadata(field_name='FirmaDigital'), 
+                            signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
                             signer, 
                             pdf_salida
                         )
@@ -277,6 +284,10 @@ elif opcion == "Firmar PDF":
                         
                     except Exception as e:
                         st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
+                    finally:
+                        # Limpiar el archivo temporal por seguridad
+                        if ruta_tmp_p12 and os.path.exists(ruta_tmp_p12):
+                            os.remove(ruta_tmp_p12)
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
