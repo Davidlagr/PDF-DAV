@@ -5,6 +5,7 @@ import tempfile
 import os
 import random
 import string
+import traceback
 from io import BytesIO
 from PIL import Image, ImageEnhance
 from streamlit_image_coordinates import streamlit_image_coordinates
@@ -12,9 +13,11 @@ import pdfplumber
 import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches
+
+# PyHanko y Cryptography
 from pyhanko.sign import signers
-from pyhanko.pdf_utils.reader import PdfFileReader
-from pyhanko.sign import fields
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from cryptography.hazmat.primitives.serialization import pkcs12
 
 st.set_page_config(page_title="Gestor PDF", page_icon="📄", layout="wide") 
 
@@ -37,7 +40,6 @@ def update_firma_pos():
 def update_texto_pos():
     st.session_state.texto_x = st.session_state.slider_texto_x
     st.session_state.texto_y = st.session_state.slider_texto_y
-
 
 st.sidebar.title("Módulos PDF")
 opcion = st.sidebar.radio("Selecciona una herramienta:", 
@@ -151,7 +153,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL NATIVO)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CON DIAGNÓSTICO)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -246,50 +248,72 @@ elif opcion == "Firmar PDF":
         
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
 
+        if archivo_p12 and password_certificado:
+            if st.button("Diagnosticar Certificado"):
+                try:
+                    private_key, cert, extras = pkcs12.load_key_and_certificates(
+                        archivo_p12.getvalue(),
+                        password_certificado.encode("utf-8")
+                    )
+                    st.success("Certificado cargado correctamente")
+                    st.write("Clave privada:", private_key is not None)
+                    st.write("Certificado:", cert is not None)
+                    if cert:
+                        st.code(str(cert.subject))
+                except Exception as e:
+                    st.error(f"ERROR REAL: {str(e)}")
+                    st.code(traceback.format_exc())
+
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma con motor criptográfico nativo..."):
+                with st.spinner("Procesando firma criptográfica..."):
                     try:
-                        from cryptography.hazmat.primitives.serialization import pkcs12
+                        # 1. Validación previa del certificado
+                        private_key, cert, extras = pkcs12.load_key_and_certificates(
+                            archivo_p12.getvalue(),
+                            password_certificado.encode("utf-8")
+                        )
+                        if private_key is None:
+                            st.error("El certificado no contiene clave privada")
+                            st.stop()
+                        if cert is None:
+                            st.error("No se encontró certificado")
+                            st.stop()
                         
-                        p12_bytes = archivo_p12.getvalue()
-                        password_bytes = password_certificado.encode('utf-8')
-                        
-                        # 1. BYPASS PYHANKO: Leemos el certificado con la librería nativa
-                        private_key, certificate, additional_certificates = pkcs12.load_key_and_certificates(
-                            p12_bytes, password_bytes
+                        # 2. Cargar el signer con el método nativo (BytesIO para evitar path-like errors)
+                        signer = signers.SimpleSigner.load_pkcs12(
+                            pfx_file=BytesIO(archivo_p12.getvalue()),
+                            passphrase=password_certificado.encode("utf-8")
                         )
                         
-                        # 2. Creamos el firmante manualmente entregando las llaves "desempacadas"
-                        signer = signers.SimpleSigner(
-                            signing_cert=certificate,
-                            signing_key=private_key,
-                            cert_registry=signers.SimpleCertificateStore()
+                        # 3. Utilizar IncrementalPdfFileWriter 
+                        pdf_writer = IncrementalPdfFileWriter(
+                            BytesIO(pdf_subido.getvalue())
                         )
                         
-                        # 3. Leer y preparar el PDF
-                        pdf_stream = BytesIO(pdf_subido.getvalue())
-                        pdf_reader = PdfFileReader(pdf_stream)
-                        pdf_salida = BytesIO()
+                        output = BytesIO()
                         
-                        # 4. Firmar el documento
+                        # 4. Firmar enviando a BytesIO
                         signers.sign_pdf(
-                            pdf_reader, 
-                            signers.PdfSignatureMetadata(field_name='FirmaDigitalLegal'), 
-                            signer, 
-                            out=pdf_salida
+                            pdf_writer, 
+                            signature_meta=signers.PdfSignatureMetadata(
+                                field_name="FirmaDigitalLegal"
+                            ), 
+                            signer=signer, 
+                            out=output
                         )
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
                             label="⬇️ Descargar PDF Firmado Digitalmente",
-                            data=pdf_salida.getvalue(),
+                            data=output.getvalue(),
                             file_name=f"firmado_digital_{pdf_subido.name}",
                             mime="application/pdf"
                         )
                         
                     except Exception as e:
-                        st.error(f"Error durante la firma: {e}. Verifica que la contraseña sea correcta.")
+                        st.error(f"ERROR REAL: {str(e)}")
+                        st.code(traceback.format_exc())
 
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
