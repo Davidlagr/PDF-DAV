@@ -281,11 +281,10 @@ elif opcion == "Firmar PDF":
                             st.error("No se encontró certificado")
                             st.stop()
                         
-                        # 2. Armar el Signer directamente con los objetos extraídos
+                        # 2. Armar el Signer directamente con los objetos extraídos (Sin cert_registry)
                         signer = signers.SimpleSigner(
                             signing_cert=cert,
-                            signing_key=private_key,
-                            cert_registry=signers.SimpleCertificateStore()
+                            signing_key=private_key
                         )
                         
                         # 3. Preparar el PDF
