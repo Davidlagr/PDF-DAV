@@ -251,6 +251,7 @@ elif opcion == "Firmar PDF":
         if archivo_p12 and password_certificado:
             if st.button("Diagnosticar Certificado"):
                 try:
+                    from cryptography.hazmat.primitives.serialization import pkcs12
                     private_key, cert, extras = pkcs12.load_key_and_certificates(
                         archivo_p12.getvalue(),
                         password_certificado.encode("utf-8")
@@ -266,41 +267,27 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica en memoria..."):
+                with st.spinner("Procesando firma criptográfica..."):
+                    ruta_p12 = None
                     try:
-                        # IMPORTACIÓN CLAVE: Traemos el almacén de certificados
-                        from pyhanko_certvalidator.registry import SimpleCertificateStore
+                        password_bytes = password_certificado.encode("utf-8")
                         
-                        # 1. Extracción nativa
-                        private_key, cert, extras = pkcs12.load_key_and_certificates(
-                            archivo_p12.getvalue(),
-                            password_certificado.encode("utf-8")
-                        )
-                        
-                        if private_key is None:
-                            st.error("El certificado no contiene clave privada")
-                            st.stop()
-                        if cert is None:
-                            st.error("No se encontró certificado")
-                            st.stop()
-                        
-                        # 2. Armar el Signer con el registro importado correctamente
-                        signer = signers.SimpleSigner(
-                            signing_cert=cert,
-                            signing_key=private_key,
-                            cert_registry=SimpleCertificateStore()
-                        )
+                        # 1. Guardar certificado en archivo temporal físico (Obliga a PyHanko a leerlo en su formato nativo)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
+                            tmp_p12.write(archivo_p12.getvalue())
+                            ruta_p12 = tmp_p12.name
+                            
+                        # 2. Cargar el certificado usando la ruta física (Evita conflictos de módulos)
+                        signer = signers.SimpleSigner.load_pkcs12(ruta_p12, password_bytes)
                         
                         # 3. Preparar el PDF en memoria
                         pdf_stream = BytesIO(pdf_subido.getvalue())
                         pdf_writer = IncrementalPdfFileWriter(pdf_stream)
                         
-                        # 4. Firmar e inyectar in_place=True
+                        # 4. Firmar e inyectar in_place=True (Evita el error 'out')
                         signers.sign_pdf(
                             pdf_writer, 
-                            signature_meta=signers.PdfSignatureMetadata(
-                                field_name="FirmaDigitalLegal"
-                            ), 
+                            signers.PdfSignatureMetadata(field_name="FirmaDigitalLegal"), 
                             signer=signer, 
                             in_place=True
                         )
@@ -316,7 +303,13 @@ elif opcion == "Firmar PDF":
                     except Exception as e:
                         st.error(f"ERROR REAL: {str(e)}")
                         st.code(traceback.format_exc())
-
+                    finally:
+                        # Limpiar el certificado físico de la nube por seguridad
+                        if ruta_p12 and os.path.exists(ruta_p12):
+                            try:
+                                os.remove(ruta_p12)
+                            except Exception:
+                                pass
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
 # ==========================================
