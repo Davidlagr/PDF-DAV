@@ -156,7 +156,8 @@ elif opcion == "Dividir o Quitar Hojas":
 # MÓDULO 4: FIRMAR PDF (VISUAL PROFESIONAL Y DIGITAL)
 # ==========================================
 elif opcion == "Firmar PDF":
-    import datetime  # Importación necesaria para el sello de tiempo
+    import datetime
+    import uuid
     st.header("✍️ Firmar PDF")
     tipo_firma = st.radio("Elige el tipo de firma:", ["Firma Visual (Imagen en el documento)", "Firma Digital Criptográfica (Archivo .p12 / .pfx)"])
     
@@ -296,7 +297,6 @@ elif opcion == "Firmar PDF":
                 
                 if quitar_fondo:
                     datas = firma_img.getdata()
-                    # Hace transparente el blanco puro o píxeles muy claros
                     newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
                     firma_img.putdata(newData)
                 
@@ -306,7 +306,6 @@ elif opcion == "Firmar PDF":
             
             st.write("### Ajuste del Bloque de Firma")
             col_t1, col_t2 = st.columns(2)
-            # Damos mayor ancho por defecto para que quepa bien el texto
             with col_t1: ancho_firma = st.slider("Ancho del bloque", 100.0, 600.0, 280.0, key="ancho_crypto")
             with col_t2: alto_firma = st.slider("Alto del bloque", 30.0, 300.0, 80.0, key="alto_crypto")
                 
@@ -316,12 +315,9 @@ elif opcion == "Firmar PDF":
 
             rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
             
-            # --- MOTOR DE DIBUJO DEL BLOQUE ESTILO ACROBAT ---
             def dibujar_bloque_firma(page, rect, img_bytes, datos):
-                # Dibujar borde suave tipo Acrobat
                 page.draw_rect(rect, color=(0.7, 0.7, 0.7), width=0.5)
                 
-                # Partir el rectángulo: Izquierda (Imagen) | Derecha (Texto)
                 if img_bytes:
                     img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
                     text_rect = fitz.Rect(rect.x0 + (rect.width * 0.38), rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
@@ -329,7 +325,6 @@ elif opcion == "Firmar PDF":
                 else:
                     text_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
                 
-                # Armar el texto profesional
                 lineas = []
                 if datos.get("nombre"): lineas.append(f"Firmado digitalmente por: {datos['nombre']}")
                 if datos.get("motivo"): lineas.append(f"Motivo: {datos['motivo']}")
@@ -346,13 +341,11 @@ elif opcion == "Firmar PDF":
                 if lineas:
                     texto_final = "\n".join(lineas)
                     page.insert_textbox(text_rect, texto_final, fontsize=8, color=(0.1, 0.1, 0.1), fontname="helv")
-            # --------------------------------------------------
 
             st.write("### Vista Previa Interactiva")
             doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
-            # Dibujar el bloque en la vista previa
             dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma)
             
             pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
@@ -402,7 +395,6 @@ elif opcion == "Firmar PDF":
                             passphrase=password_bytes
                         )
                         
-                        # --- PASO 1: ESTAMPAR BLOQUE VISUAL PRIMERO ---
                         if incluir_rubrica and rect_firma:
                             doc_visual = fitz.open(stream=pdf_subido.getvalue(), filetype="pdf")
                             page_visual = doc_visual[pagina_firma - 1]
@@ -415,13 +407,15 @@ elif opcion == "Firmar PDF":
                         else:
                             pdf_base = BytesIO(pdf_subido.getvalue())
                         
-                        # --- PASO 2: INYECTAR SELLO CRIPTOGRÁFICO ---
                         pdf_writer = IncrementalPdfFileWriter(pdf_base)
+                        
+                        # Generar un ID único para permitir múltiples firmas en el mismo documento
+                        campo_unico = f"FirmaDigitalLegal_{uuid.uuid4().hex[:8]}"
                         
                         signers.sign_pdf(
                             pdf_writer, 
                             signers.PdfSignatureMetadata(
-                                field_name="FirmaDigitalLegal",
+                                field_name=campo_unico,
                                 location=datos_texto_firma.get("ciudad", ""),
                                 reason=datos_texto_firma.get("motivo", "")
                             ), 
