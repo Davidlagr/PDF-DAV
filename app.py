@@ -153,7 +153,7 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL CON DIAGNÓSTICO)
+# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL COMBINADO)
 # ==========================================
 elif opcion == "Firmar PDF":
     st.header("✍️ Firmar PDF")
@@ -242,11 +242,73 @@ elif opcion == "Firmar PDF":
         
         col_firma1, col_firma2 = st.columns(2)
         with col_firma1:
-            pdf_subido = st.file_uploader("1. Sube el PDF a firmar", type=["pdf"])
+            pdf_subido = st.file_uploader("1. Sube el PDF a firmar", type=["pdf"], key="pdf_crypto")
         with col_firma2:
             archivo_p12 = st.file_uploader("2. Sube tu certificado (.p12 / .pfx)", type=["p12", "pfx"])
         
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
+
+        # --- SECCIÓN OPCIONAL: RÚBRICA VISUAL ---
+        incluir_rubrica = st.checkbox("✒️ Añadir rúbrica visual (dibujo/imagen) antes de sellar digitalmente")
+        firma_bytes = None
+        rect_firma = None
+        pagina_firma = 1
+
+        if incluir_rubrica and pdf_subido:
+            st.write("---")
+            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
+            
+            pdf_bytes_tmp = pdf_subido.getvalue()
+            doc_info = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
+            num_paginas = len(doc_info)
+            
+            pagina_firma = st.number_input("Página para la rúbrica:", min_value=1, max_value=num_paginas, value=1, key="pag_crypto")
+            page_info = doc_info[pagina_firma - 1]
+            max_width = float(page_info.rect.width)
+            max_height = float(page_info.rect.height)
+            doc_info.close()
+
+            if archivo_firma:
+                firma_img = Image.open(archivo_firma).convert("RGBA")
+                quitar_fondo = st.checkbox("Quitar fondo blanco", key="fondo_crypto")
+                
+                if quitar_fondo:
+                    datas = firma_img.getdata()
+                    newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
+                    firma_img.putdata(newData)
+                
+                img_byte_arr = BytesIO()
+                firma_img.save(img_byte_arr, format='PNG')
+                firma_bytes = img_byte_arr.getvalue()
+                
+                col_t1, col_t2 = st.columns(2)
+                with col_t1: ancho_firma = st.slider("Ancho", 10.0, 500.0, 150.0, key="ancho_crypto")
+                with col_t2: alto_firma = st.slider("Alto", 10.0, 500.0, 50.0, key="alto_crypto")
+                    
+                col_p1, col_p2 = st.columns(2)
+                with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
+                with col_p2: st.slider("Vertical (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
+
+                rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
+                
+                st.write("### Vista Previa Interactiva")
+                doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
+                page_preview = doc_preview[pagina_firma - 1]
+                page_preview.insert_image(rect_firma, stream=firma_bytes)
+                
+                pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+                img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                coords = streamlit_image_coordinates(img_pil, key="click_crypto")
+                if coords is not None:
+                    click_id = f"{coords['x']}-{coords['y']}"
+                    if st.session_state.last_click_firma != click_id:
+                        st.session_state.last_click_firma = click_id
+                        st.session_state.firma_x = float(coords["x"])
+                        st.session_state.firma_y = float(coords["y"])
+                        st.rerun()
+                doc_preview.close()
+            st.write("---")
 
         if archivo_p12 and password_certificado:
             if st.button("Diagnosticar Certificado"):
@@ -259,8 +321,6 @@ elif opcion == "Firmar PDF":
                     st.success("Certificado cargado correctamente")
                     st.write("Clave privada:", private_key is not None)
                     st.write("Certificado:", cert is not None)
-                    st.write("Tipo de clave privada:", type(private_key))
-                    st.write("Tipo de certificado:", type(cert))
                     if cert:
                         st.code(str(cert.subject))
                 except Exception as e:
@@ -269,37 +329,34 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando y diagnosticando signer..."):
+                with st.spinner("Procesando firma criptográfica..."):
                     ruta_p12 = None
                     try:
                         password_bytes = password_certificado.encode("utf-8")
                         
-                        # 1. Guardar certificado en archivo temporal físico
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
                             tmp_p12.write(archivo_p12.getvalue())
                             ruta_p12 = tmp_p12.name
                             
-                        # 2. Cargar el certificado usando los parámetros nombrados explícitamente
                         signer = signers.SimpleSigner.load_pkcs12(
                             pfx_file=ruta_p12,
                             passphrase=password_bytes
                         )
                         
-                        # --- BLOQUE DE DIAGNÓSTICO DEL SIGNER ---
-                        st.write("SIGNER:", signer)
-                        if signer:
-                            st.write("TIPO:", type(signer))
-                            st.success("Signer creado correctamente")
+                        # --- PASO 1: INYECTAR RÚBRICA VISUAL SI SE SOLICITÓ ---
+                        if incluir_rubrica and firma_bytes and rect_firma:
+                            doc_visual = fitz.open(stream=pdf_subido.getvalue(), filetype="pdf")
+                            page_visual = doc_visual[pagina_firma - 1]
+                            page_visual.insert_image(rect_firma, stream=firma_bytes)
+                            pdf_base = BytesIO()
+                            doc_visual.save(pdf_base)
+                            doc_visual.close()
                         else:
-                            st.error("PyHanko devolvió signer=None")
-                            st.stop()
-                        # ----------------------------------------
+                            pdf_base = BytesIO(pdf_subido.getvalue())
                         
-                        # 3. Preparar el PDF en memoria
-                        pdf_stream = BytesIO(pdf_subido.getvalue())
-                        pdf_writer = IncrementalPdfFileWriter(pdf_stream)
+                        # --- PASO 2: SELLAR CRIPTOGRÁFICAMENTE ---
+                        pdf_writer = IncrementalPdfFileWriter(pdf_base)
                         
-                        # 4. Firmar e inyectar in_place=True
                         signers.sign_pdf(
                             pdf_writer, 
                             signers.PdfSignatureMetadata(field_name="FirmaDigitalLegal"), 
@@ -309,8 +366,8 @@ elif opcion == "Firmar PDF":
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
-                            label="⬇️ Descargar PDF Firmado Digitalmente",
-                            data=pdf_stream.getvalue(),
+                            label="⬇️ Descargar PDF Firmado",
+                            data=pdf_base.getvalue(),
                             file_name=f"firmado_digital_{pdf_subido.name}",
                             mime="application/pdf"
                         )
@@ -319,7 +376,6 @@ elif opcion == "Firmar PDF":
                         st.error(f"ERROR REAL: {str(e)}")
                         st.code(traceback.format_exc())
                     finally:
-                        # Limpiar el certificado físico de la nube
                         if ruta_p12 and os.path.exists(ruta_p12):
                             try:
                                 os.remove(ruta_p12)
