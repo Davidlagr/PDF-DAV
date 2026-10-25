@@ -268,6 +268,9 @@ elif opcion == "Firmar PDF":
             if st.button("Firmar Documento Digitalmente", type="primary"):
                 with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
+                        # IMPORTACIÓN CLAVE: Traemos el almacén de certificados desde su nueva ubicación
+                        from pyhanko_certvalidator.registry import SimpleCertificateStore
+                        
                         # 1. Extracción nativa
                         private_key, cert, extras = pkcs12.load_key_and_certificates(
                             archivo_p12.getvalue(),
@@ -281,10 +284,11 @@ elif opcion == "Firmar PDF":
                             st.error("No se encontró certificado")
                             st.stop()
                         
-                        # 2. Armar el Signer directamente con los objetos extraídos (Sin cert_registry)
+                        # 2. Armar el Signer con el registro importado correctamente
                         signer = signers.SimpleSigner(
                             signing_cert=cert,
-                            signing_key=private_key
+                            signing_key=private_key,
+                            cert_registry=SimpleCertificateStore()
                         )
                         
                         # 3. Preparar el PDF
