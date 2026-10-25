@@ -237,7 +237,7 @@ elif opcion == "Firmar PDF":
                         st.success("¡Firma aplicada con éxito!")
                         st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
     
-    else:
+   else:
         st.info("Aplica una firma digital con validez legal subiendo tu certificado PKCS#12 (.p12 o .pfx).")
         
         col_firma1, col_firma2 = st.columns(2)
@@ -264,11 +264,11 @@ elif opcion == "Firmar PDF":
                     st.error(f"ERROR REAL: {str(e)}")
                     st.code(traceback.format_exc())
 
-       if pdf_subido and archivo_p12 and password_certificado:
+        if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
                 with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
-                        # 1. Extracción nativa (la misma que funcionó en el diagnóstico)
+                        # 1. Extracción nativa
                         private_key, cert, extras = pkcs12.load_key_and_certificates(
                             archivo_p12.getvalue(),
                             password_certificado.encode("utf-8")
@@ -281,7 +281,7 @@ elif opcion == "Firmar PDF":
                             st.error("No se encontró certificado")
                             st.stop()
                         
-                        # 2. Armar el Signer directamente con los objetos extraídos (Esquivando load_pkcs12)
+                        # 2. Armar el Signer directamente con los objetos extraídos
                         signer = signers.SimpleSigner(
                             signing_cert=cert,
                             signing_key=private_key,
