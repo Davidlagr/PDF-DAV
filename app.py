@@ -264,15 +264,16 @@ elif opcion == "Firmar PDF":
                     st.error(f"ERROR REAL: {str(e)}")
                     st.code(traceback.format_exc())
 
-        if pdf_subido and archivo_p12 and password_certificado:
+       if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica..."):
+                with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
-                        # 1. Validación previa del certificado
+                        # 1. Extracción nativa (la misma que funcionó en el diagnóstico)
                         private_key, cert, extras = pkcs12.load_key_and_certificates(
                             archivo_p12.getvalue(),
                             password_certificado.encode("utf-8")
                         )
+                        
                         if private_key is None:
                             st.error("El certificado no contiene clave privada")
                             st.stop()
@@ -280,20 +281,21 @@ elif opcion == "Firmar PDF":
                             st.error("No se encontró certificado")
                             st.stop()
                         
-                        # 2. Cargar el signer con el método nativo (BytesIO para evitar path-like errors)
-                        signer = signers.SimpleSigner.load_pkcs12(
-                            pfx_file=BytesIO(archivo_p12.getvalue()),
-                            passphrase=password_certificado.encode("utf-8")
+                        # 2. Armar el Signer directamente con los objetos extraídos (Esquivando load_pkcs12)
+                        signer = signers.SimpleSigner(
+                            signing_cert=cert,
+                            signing_key=private_key,
+                            cert_registry=signers.SimpleCertificateStore()
                         )
                         
-                        # 3. Utilizar IncrementalPdfFileWriter 
+                        # 3. Preparar el PDF
                         pdf_writer = IncrementalPdfFileWriter(
                             BytesIO(pdf_subido.getvalue())
                         )
                         
                         output = BytesIO()
                         
-                        # 4. Firmar enviando a BytesIO
+                        # 4. Firmar e inyectar
                         signers.sign_pdf(
                             pdf_writer, 
                             signature_meta=signers.PdfSignatureMetadata(
