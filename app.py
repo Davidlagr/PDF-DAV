@@ -237,7 +237,7 @@ elif opcion == "Firmar PDF":
                         st.success("¡Firma aplicada con éxito!")
                         st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
     
-   else:
+    else:
         st.info("Aplica una firma digital con validez legal subiendo tu certificado PKCS#12 (.p12 o .pfx).")
         
         col_firma1, col_firma2 = st.columns(2)
