@@ -259,6 +259,8 @@ elif opcion == "Firmar PDF":
                     st.success("Certificado cargado correctamente")
                     st.write("Clave privada:", private_key is not None)
                     st.write("Certificado:", cert is not None)
+                    st.write("Tipo de clave privada:", type(private_key))
+                    st.write("Tipo de certificado:", type(cert))
                     if cert:
                         st.code(str(cert.subject))
                 except Exception as e:
@@ -267,24 +269,37 @@ elif opcion == "Firmar PDF":
 
         if pdf_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
-                with st.spinner("Procesando firma criptográfica..."):
+                with st.spinner("Procesando y diagnosticando signer..."):
                     ruta_p12 = None
                     try:
                         password_bytes = password_certificado.encode("utf-8")
                         
-                        # 1. Guardar certificado en archivo temporal físico (Obliga a PyHanko a leerlo en su formato nativo)
+                        # 1. Guardar certificado en archivo temporal físico
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
                             tmp_p12.write(archivo_p12.getvalue())
                             ruta_p12 = tmp_p12.name
                             
-                        # 2. Cargar el certificado usando la ruta física (Evita conflictos de módulos)
-                        signer = signers.SimpleSigner.load_pkcs12(ruta_p12, password_bytes)
+                        # 2. Cargar el certificado usando los parámetros nombrados explícitamente
+                        signer = signers.SimpleSigner.load_pkcs12(
+                            pfx_file=ruta_p12,
+                            passphrase=password_bytes
+                        )
+                        
+                        # --- BLOQUE DE DIAGNÓSTICO DEL SIGNER ---
+                        st.write("SIGNER:", signer)
+                        if signer:
+                            st.write("TIPO:", type(signer))
+                            st.success("Signer creado correctamente")
+                        else:
+                            st.error("PyHanko devolvió signer=None")
+                            st.stop()
+                        # ----------------------------------------
                         
                         # 3. Preparar el PDF en memoria
                         pdf_stream = BytesIO(pdf_subido.getvalue())
                         pdf_writer = IncrementalPdfFileWriter(pdf_stream)
                         
-                        # 4. Firmar e inyectar in_place=True (Evita el error 'out')
+                        # 4. Firmar e inyectar in_place=True
                         signers.sign_pdf(
                             pdf_writer, 
                             signers.PdfSignatureMetadata(field_name="FirmaDigitalLegal"), 
@@ -304,7 +319,7 @@ elif opcion == "Firmar PDF":
                         st.error(f"ERROR REAL: {str(e)}")
                         st.code(traceback.format_exc())
                     finally:
-                        # Limpiar el certificado físico de la nube por seguridad
+                        # Limpiar el certificado físico de la nube
                         if ruta_p12 and os.path.exists(ruta_p12):
                             try:
                                 os.remove(ruta_p12)
