@@ -153,9 +153,10 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL Y DIGITAL COMBINADO)
+# MÓDULO 4: FIRMAR PDF (VISUAL PROFESIONAL Y DIGITAL)
 # ==========================================
 elif opcion == "Firmar PDF":
+    import datetime  # Importación necesaria para el sello de tiempo
     st.header("✍️ Firmar PDF")
     tipo_firma = st.radio("Elige el tipo de firma:", ["Firma Visual (Imagen en el documento)", "Firma Digital Criptográfica (Archivo .p12 / .pfx)"])
     
@@ -248,15 +249,36 @@ elif opcion == "Firmar PDF":
         
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
 
-        # --- SECCIÓN OPCIONAL: RÚBRICA VISUAL ---
-        incluir_rubrica = st.checkbox("✒️ Añadir rúbrica visual (dibujo/imagen) antes de sellar digitalmente")
+        # --- SECCIÓN: BLOQUE PROFESIONAL (ESTILO ACROBAT) ---
+        incluir_rubrica = st.checkbox("✒️ Añadir bloque de firma profesional (Rúbrica + Datos textuales)", value=True)
         firma_bytes = None
         rect_firma = None
         pagina_firma = 1
+        datos_texto_firma = {}
 
         if incluir_rubrica and pdf_subido:
             st.write("---")
-            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
+            st.write("### Datos del Firmante")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                nombre_firmante = st.text_input("Nombre completo:", "David Moisés Lagos Riaño")
+                motivo_firma = st.text_input("Motivo de la firma:", "Soy el autor de este documento")
+                ciudad_firma = st.text_input("Ciudad / Ubicación:", "Bogotá, Colombia")
+            with col_d2:
+                correo_firma = st.text_input("Correo electrónico:", "")
+                telefono_firma = st.text_input("Número de teléfono:", "")
+                mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True)
+
+            datos_texto_firma = {
+                "nombre": nombre_firmante,
+                "motivo": motivo_firma,
+                "ciudad": ciudad_firma,
+                "correo": correo_firma,
+                "telefono": telefono_firma,
+                "fecha": mostrar_fecha
+            }
+
+            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
             
             pdf_bytes_tmp = pdf_subido.getvalue()
             doc_info = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
@@ -270,44 +292,81 @@ elif opcion == "Firmar PDF":
 
             if archivo_firma:
                 firma_img = Image.open(archivo_firma).convert("RGBA")
-                quitar_fondo = st.checkbox("Quitar fondo blanco", key="fondo_crypto")
+                quitar_fondo = st.checkbox("Quitar fondo blanco", key="fondo_crypto", value=True)
                 
                 if quitar_fondo:
                     datas = firma_img.getdata()
+                    # Hace transparente el blanco puro o píxeles muy claros
                     newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
                     firma_img.putdata(newData)
                 
                 img_byte_arr = BytesIO()
                 firma_img.save(img_byte_arr, format='PNG')
                 firma_bytes = img_byte_arr.getvalue()
+            
+            st.write("### Ajuste del Bloque de Firma")
+            col_t1, col_t2 = st.columns(2)
+            # Damos mayor ancho por defecto para que quepa bien el texto
+            with col_t1: ancho_firma = st.slider("Ancho del bloque", 100.0, 600.0, 280.0, key="ancho_crypto")
+            with col_t2: alto_firma = st.slider("Alto del bloque", 30.0, 300.0, 80.0, key="alto_crypto")
                 
-                col_t1, col_t2 = st.columns(2)
-                with col_t1: ancho_firma = st.slider("Ancho", 10.0, 500.0, 150.0, key="ancho_crypto")
-                with col_t2: alto_firma = st.slider("Alto", 10.0, 500.0, 50.0, key="alto_crypto")
-                    
-                col_p1, col_p2 = st.columns(2)
-                with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
-                with col_p2: st.slider("Vertical (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
+            col_p1, col_p2 = st.columns(2)
+            with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
+            with col_p2: st.slider("Vertical (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
 
-                rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
+            rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
+            
+            # --- MOTOR DE DIBUJO DEL BLOQUE ESTILO ACROBAT ---
+            def dibujar_bloque_firma(page, rect, img_bytes, datos):
+                # Dibujar borde suave tipo Acrobat
+                page.draw_rect(rect, color=(0.7, 0.7, 0.7), width=0.5)
                 
-                st.write("### Vista Previa Interactiva")
-                doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
-                page_preview = doc_preview[pagina_firma - 1]
-                page_preview.insert_image(rect_firma, stream=firma_bytes)
+                # Partir el rectángulo: Izquierda (Imagen) | Derecha (Texto)
+                if img_bytes:
+                    img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
+                    text_rect = fitz.Rect(rect.x0 + (rect.width * 0.38), rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
+                    page.insert_image(img_rect, stream=img_bytes, keep_proportion=True)
+                else:
+                    text_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
                 
-                pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
-                img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                # Armar el texto profesional
+                lineas = []
+                if datos.get("nombre"): lineas.append(f"Firmado digitalmente por: {datos['nombre']}")
+                if datos.get("motivo"): lineas.append(f"Motivo: {datos['motivo']}")
+                if datos.get("ciudad"): lineas.append(f"Ubicación: {datos['ciudad']}")
                 
-                coords = streamlit_image_coordinates(img_pil, key="click_crypto")
-                if coords is not None:
-                    click_id = f"{coords['x']}-{coords['y']}"
-                    if st.session_state.last_click_firma != click_id:
-                        st.session_state.last_click_firma = click_id
-                        st.session_state.firma_x = float(coords["x"])
-                        st.session_state.firma_y = float(coords["y"])
-                        st.rerun()
-                doc_preview.close()
+                contacto = []
+                if datos.get("correo"): contacto.append(datos['correo'])
+                if datos.get("telefono"): contacto.append(datos['telefono'])
+                if contacto: lineas.append(f"Contacto: {' | '.join(contacto)}")
+                
+                if datos.get("fecha"): 
+                    lineas.append(f"Fecha: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                if lineas:
+                    texto_final = "\n".join(lineas)
+                    page.insert_textbox(text_rect, texto_final, fontsize=8, color=(0.1, 0.1, 0.1), fontname="helv")
+            # --------------------------------------------------
+
+            st.write("### Vista Previa Interactiva")
+            doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
+            page_preview = doc_preview[pagina_firma - 1]
+            
+            # Dibujar el bloque en la vista previa
+            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma)
+            
+            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            coords = streamlit_image_coordinates(img_pil, key="click_crypto")
+            if coords is not None:
+                click_id = f"{coords['x']}-{coords['y']}"
+                if st.session_state.last_click_firma != click_id:
+                    st.session_state.last_click_firma = click_id
+                    st.session_state.firma_x = float(coords["x"])
+                    st.session_state.firma_y = float(coords["y"])
+                    st.rerun()
+            doc_preview.close()
             st.write("---")
 
         if archivo_p12 and password_certificado:
@@ -343,28 +402,34 @@ elif opcion == "Firmar PDF":
                             passphrase=password_bytes
                         )
                         
-                        # --- PASO 1: INYECTAR RÚBRICA VISUAL SI SE SOLICITÓ ---
-                        if incluir_rubrica and firma_bytes and rect_firma:
+                        # --- PASO 1: ESTAMPAR BLOQUE VISUAL PRIMERO ---
+                        if incluir_rubrica and rect_firma:
                             doc_visual = fitz.open(stream=pdf_subido.getvalue(), filetype="pdf")
                             page_visual = doc_visual[pagina_firma - 1]
-                            page_visual.insert_image(rect_firma, stream=firma_bytes)
+                            
+                            dibujar_bloque_firma(page_visual, rect_firma, firma_bytes, datos_texto_firma)
+                            
                             pdf_base = BytesIO()
                             doc_visual.save(pdf_base)
                             doc_visual.close()
                         else:
                             pdf_base = BytesIO(pdf_subido.getvalue())
                         
-                        # --- PASO 2: SELLAR CRIPTOGRÁFICAMENTE ---
+                        # --- PASO 2: INYECTAR SELLO CRIPTOGRÁFICO ---
                         pdf_writer = IncrementalPdfFileWriter(pdf_base)
                         
                         signers.sign_pdf(
                             pdf_writer, 
-                            signers.PdfSignatureMetadata(field_name="FirmaDigitalLegal"), 
+                            signers.PdfSignatureMetadata(
+                                field_name="FirmaDigitalLegal",
+                                location=datos_texto_firma.get("ciudad", ""),
+                                reason=datos_texto_firma.get("motivo", "")
+                            ), 
                             signer=signer, 
                             in_place=True
                         )
                         
-                        st.success("¡PDF firmado correctamente con certificado digital!")
+                        st.success("¡PDF firmado correctamente con bloque visual y certificado digital!")
                         st.download_button(
                             label="⬇️ Descargar PDF Firmado",
                             data=pdf_base.getvalue(),
