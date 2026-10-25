@@ -268,7 +268,7 @@ elif opcion == "Firmar PDF":
             if st.button("Firmar Documento Digitalmente", type="primary"):
                 with st.spinner("Procesando firma criptográfica en memoria..."):
                     try:
-                        # IMPORTACIÓN CLAVE: Traemos el almacén de certificados desde su nueva ubicación
+                        # IMPORTACIÓN CLAVE: Traemos el almacén de certificados
                         from pyhanko_certvalidator.registry import SimpleCertificateStore
                         
                         # 1. Extracción nativa
@@ -291,27 +291,24 @@ elif opcion == "Firmar PDF":
                             cert_registry=SimpleCertificateStore()
                         )
                         
-                        # 3. Preparar el PDF
-                        pdf_writer = IncrementalPdfFileWriter(
-                            BytesIO(pdf_subido.getvalue())
-                        )
+                        # 3. Preparar el PDF en memoria
+                        pdf_stream = BytesIO(pdf_subido.getvalue())
+                        pdf_writer = IncrementalPdfFileWriter(pdf_stream)
                         
-                        output = BytesIO()
-                        
-                        # 4. Firmar e inyectar
+                        # 4. Firmar e inyectar in_place=True
                         signers.sign_pdf(
                             pdf_writer, 
                             signature_meta=signers.PdfSignatureMetadata(
                                 field_name="FirmaDigitalLegal"
                             ), 
                             signer=signer, 
-                            out=output
+                            in_place=True
                         )
                         
                         st.success("¡PDF firmado correctamente con certificado digital!")
                         st.download_button(
                             label="⬇️ Descargar PDF Firmado Digitalmente",
-                            data=output.getvalue(),
+                            data=pdf_stream.getvalue(),
                             file_name=f"firmado_digital_{pdf_subido.name}",
                             mime="application/pdf"
                         )
