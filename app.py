@@ -316,15 +316,17 @@ elif opcion == "Firmar PDF":
             rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
             
             def dibujar_bloque_firma(page, rect, img_bytes, datos):
-                page.draw_rect(rect, color=(0.7, 0.7, 0.7), width=0.5)
+                # Borde del bloque en color gris oscuro
+                page.draw_rect(rect, color=(0.4, 0.4, 0.4), width=1.0)
                 
                 if img_bytes:
                     img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
-                    text_rect = fitz.Rect(rect.x0 + (rect.width * 0.38), rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
+                    text_x0 = rect.x0 + (rect.width * 0.38)
                     page.insert_image(img_rect, stream=img_bytes, keep_proportion=True)
                 else:
-                    text_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x1 - 5, rect.y1 - 5)
+                    text_x0 = rect.x0 + 10
                 
+                # Compilar líneas
                 lineas = []
                 if datos.get("nombre"): lineas.append(f"Firmado digitalmente por: {datos['nombre']}")
                 if datos.get("motivo"): lineas.append(f"Motivo: {datos['motivo']}")
@@ -338,9 +340,11 @@ elif opcion == "Firmar PDF":
                 if datos.get("fecha"): 
                     lineas.append(f"Fecha: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                if lineas:
-                    texto_final = "\n".join(lineas)
-                    page.insert_textbox(text_rect, texto_final, fontsize=8, color=(0.1, 0.1, 0.1), fontname="helv")
+                # Inserción INFALIBLE línea por línea, negro puro (0,0,0)
+                y_text = rect.y0 + 15
+                for linea in lineas:
+                    page.insert_text(fitz.Point(text_x0, y_text), linea, fontsize=8.5, color=(0, 0, 0), fontname="helv")
+                    y_text += 12
 
             st.write("### Vista Previa Interactiva")
             doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
@@ -348,7 +352,7 @@ elif opcion == "Firmar PDF":
             
             dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma)
             
-            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
             coords = streamlit_image_coordinates(img_pil, key="click_crypto")
@@ -356,8 +360,8 @@ elif opcion == "Firmar PDF":
                 click_id = f"{coords['x']}-{coords['y']}"
                 if st.session_state.last_click_firma != click_id:
                     st.session_state.last_click_firma = click_id
-                    st.session_state.firma_x = float(coords["x"])
-                    st.session_state.firma_y = float(coords["y"])
+                    st.session_state.firma_x = float(coords["x"]) / 1.5
+                    st.session_state.firma_y = float(coords["y"]) / 1.5
                     st.rerun()
             doc_preview.close()
             st.write("---")
@@ -409,7 +413,6 @@ elif opcion == "Firmar PDF":
                         
                         pdf_writer = IncrementalPdfFileWriter(pdf_base)
                         
-                        # Generar un ID único para permitir múltiples firmas en el mismo documento
                         campo_unico = f"FirmaDigitalLegal_{uuid.uuid4().hex[:8]}"
                         
                         signers.sign_pdf(
