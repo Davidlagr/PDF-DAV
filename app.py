@@ -153,19 +153,58 @@ elif opcion == "Dividir o Quitar Hojas":
                     st.download_button(label="Descargar PDF Modificado", data=salida_pdf.getvalue(), file_name=f"modificado_{archivo_pdf.name}", mime="application/pdf")
 
 # ==========================================
-# MÓDULO 4: FIRMAR PDF (VISUAL PROFESIONAL Y DIGITAL)
+# MÓDULO 4: FIRMAR PDF O WORD (VISUAL Y DIGITAL)
 # ==========================================
 elif opcion == "Firmar PDF":
     import datetime
     import uuid
-    st.header("✍️ Firmar PDF")
+    import subprocess
     
+    st.header("✍️ Firmar Documento (Soporta PDF y Word)")
+    
+    # --- MOTOR DE CONVERSIÓN Y CACHÉ (Evita tiempos de carga al mover la firma) ---
+    def procesar_archivo_subido(archivo, key_prefix):
+        session_key = f"cache_pdf_{key_prefix}_{archivo.name}"
+        nombre_pdf = archivo.name.lower().replace(".docx", ".pdf")
+        
+        if session_key in st.session_state:
+            return st.session_state[session_key], nombre_pdf
+            
+        if archivo.name.lower().endswith(".docx"):
+            with st.spinner("Convirtiendo Word a PDF en el servidor... (Esto toma unos segundos)"):
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
+                        tmp_docx.write(archivo.getvalue())
+                        ruta_docx = tmp_docx.name
+                    
+                    outdir = os.path.dirname(ruta_docx)
+                    subprocess.run(
+                        ["libreoffice", "--headless", "--convert-to", "pdf", ruta_docx, "--outdir", outdir],
+                        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    )
+                    ruta_pdf = ruta_docx.replace(".docx", ".pdf")
+                    
+                    with open(ruta_pdf, "rb") as f:
+                        pdf_result = f.read()
+                    
+                    os.remove(ruta_docx)
+                    os.remove(ruta_pdf)
+                    
+                    st.session_state[session_key] = pdf_result
+                    return pdf_result, nombre_pdf
+                except Exception as e:
+                    st.error("Falló la conversión del documento Word.")
+                    st.info("💡 IMPORTANTE: Si estás en Streamlit Cloud, debes crear un archivo llamado `packages.txt` en GitHub y escribir `libreoffice` adentro.")
+                    st.stop()
+        else:
+            pdf_result = archivo.getvalue()
+            st.session_state[session_key] = pdf_result
+            return pdf_result, nombre_pdf
+
     # --- FUNCIÓN MAESTRA DE DIBUJO ---
-    # Unifica el diseño del bloque para la firma visual y la firma digital
     def dibujar_bloque_firma(page, rect, img_bytes, datos, font_size):
-        # Condición 1: Si hay datos de texto, dibujamos el bloque profesional (Marco + Rúbrica + Texto)
         if datos and any(datos.values()): 
-            page.draw_rect(rect, color=(0.4, 0.4, 0.4), width=1.0) # Borde gris oscuro
+            page.draw_rect(rect, color=(0.4, 0.4, 0.4), width=1.0)
             
             if img_bytes:
                 img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
@@ -174,7 +213,6 @@ elif opcion == "Firmar PDF":
             else:
                 text_x0 = rect.x0 + 10
             
-            # Recopilamos las líneas de texto
             lineas = []
             if datos.get("nombre"): lineas.append(f"Firmado por: {datos['nombre']}")
             if datos.get("motivo"): lineas.append(f"Motivo: {datos['motivo']}")
@@ -188,15 +226,12 @@ elif opcion == "Firmar PDF":
             if datos.get("fecha"): 
                 lineas.append(f"Fecha: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Cálculo dinámico del interlineado basado en el tamaño de la fuente seleccionada
             y_text = rect.y0 + font_size + 4 
             espaciado = font_size * 1.4
             
             for linea in lineas:
                 page.insert_text(fitz.Point(text_x0, y_text), linea, fontsize=font_size, color=(0, 0, 0), fontname="helv")
                 y_text += espaciado
-                
-        # Condición 2: Si NO hay texto, solo dibujamos la imagen extendida en el recuadro
         else:
             if img_bytes:
                 page.insert_image(rect, stream=img_bytes, keep_proportion=False)
@@ -208,9 +243,9 @@ elif opcion == "Firmar PDF":
     # RAMA 1: FIRMA VISUAL
     # ---------------------------------------------------------
     if tipo_firma == "Firma Visual (Imagen y/o Texto en el documento)":
-        archivo_pdf = st.file_uploader("Paso 1: Sube el PDF a firmar", type=["pdf"], key="pdf_firma_vis")
-        if archivo_pdf:
-            pdf_bytes = archivo_pdf.getvalue()
+        archivo_subido = st.file_uploader("Paso 1: Sube el documento a firmar (PDF o Word)", type=["pdf", "docx"], key="pdf_firma_vis")
+        if archivo_subido:
+            pdf_bytes, nombre_pdf = procesar_archivo_subido(archivo_subido, "vis")
             doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
             num_paginas = len(doc_info)
             
@@ -316,7 +351,7 @@ elif opcion == "Firmar PDF":
                             doc_final.save(salida_pdf)
                         doc_final.close()
                         st.success("¡Firma aplicada con éxito!")
-                        st.download_button(label="Descargar PDF Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{archivo_pdf.name}", mime="application/pdf")
+                        st.download_button(label="Descargar Documento Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{nombre_pdf}", mime="application/pdf")
     
     # ---------------------------------------------------------
     # RAMA 2: FIRMA DIGITAL CRIPTOGRÁFICA
@@ -326,10 +361,15 @@ elif opcion == "Firmar PDF":
         
         col_firma1, col_firma2 = st.columns(2)
         with col_firma1:
-            pdf_subido = st.file_uploader("1. Sube el PDF a firmar", type=["pdf"], key="pdf_crypto")
+            archivo_subido = st.file_uploader("1. Sube el documento a firmar (PDF o Word)", type=["pdf", "docx"], key="pdf_crypto")
         with col_firma2:
             archivo_p12 = st.file_uploader("2. Sube tu certificado (.p12 / .pfx)", type=["p12", "pfx"])
         
+        pdf_bytes = None
+        nombre_pdf = ""
+        if archivo_subido:
+            pdf_bytes, nombre_pdf = procesar_archivo_subido(archivo_subido, "dig")
+
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
 
         incluir_rubrica = st.checkbox("✒️ Añadir bloque de firma profesional (Rúbrica + Datos textuales)", value=True, key="check_rubrica_dig")
@@ -339,7 +379,7 @@ elif opcion == "Firmar PDF":
         datos_texto_firma = {}
         tamano_fuente = 8.5
 
-        if incluir_rubrica and pdf_subido:
+        if incluir_rubrica and pdf_bytes:
             st.write("---")
             st.write("### Datos del Firmante")
             col_d1, col_d2 = st.columns(2)
@@ -364,8 +404,7 @@ elif opcion == "Firmar PDF":
 
             archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
             
-            pdf_bytes_tmp = pdf_subido.getvalue()
-            doc_info = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
+            doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
             num_paginas = len(doc_info)
             
             pagina_firma = st.number_input("Página para la rúbrica:", min_value=1, max_value=num_paginas, value=1, key="pag_crypto")
@@ -399,7 +438,7 @@ elif opcion == "Firmar PDF":
             rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
 
             st.write("### Vista Previa Interactiva")
-            doc_preview = fitz.open(stream=pdf_bytes_tmp, filetype="pdf")
+            doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
             dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
@@ -435,7 +474,7 @@ elif opcion == "Firmar PDF":
                     st.error(f"ERROR REAL: {str(e)}")
                     st.code(traceback.format_exc())
 
-        if pdf_subido and archivo_p12 and password_certificado:
+        if archivo_subido and archivo_p12 and password_certificado:
             if st.button("Firmar Documento Digitalmente", type="primary"):
                 with st.spinner("Procesando firma criptográfica..."):
                     ruta_p12 = None
@@ -452,7 +491,7 @@ elif opcion == "Firmar PDF":
                         )
                         
                         if incluir_rubrica and rect_firma:
-                            doc_visual = fitz.open(stream=pdf_subido.getvalue(), filetype="pdf")
+                            doc_visual = fitz.open(stream=pdf_bytes, filetype="pdf")
                             page_visual = doc_visual[pagina_firma - 1]
                             
                             dibujar_bloque_firma(page_visual, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
@@ -461,10 +500,9 @@ elif opcion == "Firmar PDF":
                             doc_visual.save(pdf_base)
                             doc_visual.close()
                         else:
-                            pdf_base = BytesIO(pdf_subido.getvalue())
+                            pdf_base = BytesIO(pdf_bytes)
                         
                         pdf_writer = IncrementalPdfFileWriter(pdf_base)
-                        
                         campo_unico = f"FirmaDigitalLegal_{uuid.uuid4().hex[:8]}"
                         
                         signers.sign_pdf(
@@ -480,9 +518,9 @@ elif opcion == "Firmar PDF":
                         
                         st.success("¡PDF firmado correctamente con bloque visual y certificado digital!")
                         st.download_button(
-                            label="⬇️ Descargar PDF Firmado",
+                            label="⬇️ Descargar Documento Firmado",
                             data=pdf_base.getvalue(),
-                            file_name=f"firmado_digital_{pdf_subido.name}",
+                            file_name=f"firmado_digital_{nombre_pdf}",
                             mime="application/pdf"
                         )
                         
@@ -494,8 +532,7 @@ elif opcion == "Firmar PDF":
                             try:
                                 os.remove(ruta_p12)
                             except Exception:
-                                pass
-# ==========================================
+                                pass# ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
 # ==========================================
 elif opcion == "Editar y Rellenar PDF":
