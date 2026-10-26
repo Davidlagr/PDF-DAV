@@ -162,7 +162,16 @@ elif opcion == "Firmar PDF":
     
     st.header("✍️ Firmar Documento (Soporta PDF y Word)")
     
-    # --- MOTOR DE CONVERSIÓN Y CACHÉ (Evita tiempos de carga al mover la firma) ---
+    # Inicializar variables de estado para sincronizar selectores de página
+    if "pag_vis" not in st.session_state: st.session_state.pag_vis = 1
+    def sync_pag_vis_top(): st.session_state.pag_vis = st.session_state.pag_vis_top
+    def sync_pag_vis_bot(): st.session_state.pag_vis = st.session_state.pag_vis_bot
+
+    if "pag_dig" not in st.session_state: st.session_state.pag_dig = 1
+    def sync_pag_dig_top(): st.session_state.pag_dig = st.session_state.pag_dig_top
+    def sync_pag_dig_bot(): st.session_state.pag_dig = st.session_state.pag_dig_bot
+    
+    # --- MOTOR DE CONVERSIÓN Y CACHÉ ---
     def procesar_archivo_subido(archivo, key_prefix):
         session_key = f"cache_pdf_{key_prefix}_{archivo.name}"
         nombre_pdf = archivo.name.lower().replace(".docx", ".pdf")
@@ -171,7 +180,7 @@ elif opcion == "Firmar PDF":
             return st.session_state[session_key], nombre_pdf
             
         if archivo.name.lower().endswith(".docx"):
-            with st.spinner("Convirtiendo Word a PDF en el servidor... (Esto toma unos segundos)"):
+            with st.spinner("Convirtiendo Word a PDF en el servidor..."):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_docx:
                         tmp_docx.write(archivo.getvalue())
@@ -194,7 +203,7 @@ elif opcion == "Firmar PDF":
                     return pdf_result, nombre_pdf
                 except Exception as e:
                     st.error("Falló la conversión del documento Word.")
-                    st.info("💡 IMPORTANTE: Si estás en Streamlit Cloud, debes crear un archivo llamado `packages.txt` en GitHub y escribir `libreoffice` adentro.")
+                    st.info("💡 IMPORTANTE: Si estás en Streamlit Cloud, asegúrate de tener el archivo `packages.txt` con la palabra `libreoffice`.")
                     st.stop()
         else:
             pdf_result = archivo.getvalue()
@@ -204,8 +213,6 @@ elif opcion == "Firmar PDF":
     # --- FUNCIÓN MAESTRA DE DIBUJO ---
     def dibujar_bloque_firma(page, rect, img_bytes, datos, font_size):
         if datos and any(datos.values()): 
-            # Se eliminó la línea page.draw_rect() para quitar el recuadro
-            
             if img_bytes:
                 img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
                 text_x0 = rect.x0 + (rect.width * 0.38)
@@ -249,15 +256,17 @@ elif opcion == "Firmar PDF":
             doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
             num_paginas = len(doc_info)
             
-            st.write("### Selecciona la página")
-            pagina_firma = st.number_input("Página a firmar:", min_value=1, max_value=num_paginas, value=1, key="pag_vis")
+            # Sincronización de límite de páginas
+            if st.session_state.pag_vis > num_paginas: st.session_state.pag_vis = num_paginas
+            pagina_firma = st.session_state.pag_vis
+            
             page_info = doc_info[pagina_firma - 1]
             max_width = float(page_info.rect.width)
             max_height = float(page_info.rect.height)
             doc_info.close()
 
             st.write("---")
-            incluir_texto = st.checkbox("📝 Añadir datos de texto junto a la rúbrica (Estilo bloque profesional)", value=False, key="check_texto_vis")
+            incluir_texto = st.checkbox("📝 Añadir datos de texto junto a la rúbrica", value=False, key="check_texto_vis")
             
             datos_texto_firma = {}
             tamano_fuente = 3.0
@@ -270,8 +279,8 @@ elif opcion == "Firmar PDF":
                     motivo_firma = st.text_input("Motivo de la firma:", "Aprobación de documento", key="mot_vis")
                     ciudad_firma = st.text_input("Ciudad / Ubicación:", "Bogotá, Colombia", key="ciu_vis")
                 with col_d2:
-                    correo_firma = st.text_input("Correo electrónico:", "", key="cor_vis")
-                    telefono_firma = st.text_input("Número de teléfono:", "", key="tel_vis")
+                    correo_firma = st.text_input("Correo electrónico:", "davidmlrdvm@gmail.com", key="cor_vis")
+                    telefono_firma = st.text_input("Número de teléfono:", "3007351747", key="tel_vis")
                     mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_vis")
                     tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_vis")
 
@@ -310,7 +319,11 @@ elif opcion == "Firmar PDF":
 
             rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
             
-            st.write("### Vista Previa Interactiva (Clic para mover)")
+            st.write("### Vista Previa Interactiva")
+            
+            # --- SELECTOR SUPERIOR ---
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_vis_top", on_change=sync_pag_vis_top)
+            
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
@@ -328,6 +341,9 @@ elif opcion == "Firmar PDF":
                     st.session_state.firma_y = float(coords["y"]) / 1.5
                     st.rerun()
             doc_preview.close()
+            
+            # --- SELECTOR INFERIOR ---
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_vis_bot", on_change=sync_pag_vis_bot)
             
             st.write("### Opciones de Seguridad")
             bloquear_pdf = st.checkbox("🔒 Bloquear PDF contra modificaciones (Impide que se borre la firma)", key="block_vis")
@@ -380,6 +396,17 @@ elif opcion == "Firmar PDF":
         tamano_fuente = 3.0
 
         if incluir_rubrica and pdf_bytes:
+            
+            doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
+            num_paginas = len(doc_info)
+            if st.session_state.pag_dig > num_paginas: st.session_state.pag_dig = num_paginas
+            pagina_firma = st.session_state.pag_dig
+            
+            page_info = doc_info[pagina_firma - 1]
+            max_width = float(page_info.rect.width)
+            max_height = float(page_info.rect.height)
+            doc_info.close()
+            
             st.write("---")
             st.write("### Datos del Firmante")
             col_d1, col_d2 = st.columns(2)
@@ -388,8 +415,8 @@ elif opcion == "Firmar PDF":
                 motivo_firma = st.text_input("Motivo de la firma:", "Soy el autor de este documento", key="mot_dig")
                 ciudad_firma = st.text_input("Ciudad / Ubicación:", "Bogotá, Colombia", key="ciu_dig")
             with col_d2:
-                correo_firma = st.text_input("Correo electrónico:", "", key="cor_dig")
-                telefono_firma = st.text_input("Número de teléfono:", "", key="tel_dig")
+                correo_firma = st.text_input("Correo electrónico:", "davidmlrdvm@gmail.com", key="cor_dig")
+                telefono_firma = st.text_input("Número de teléfono:", "3007351747", key="tel_dig")
                 mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_dig")
                 tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_dig")
 
@@ -404,15 +431,6 @@ elif opcion == "Firmar PDF":
 
             archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
             
-            doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
-            num_paginas = len(doc_info)
-            
-            pagina_firma = st.number_input("Página para la rúbrica:", min_value=1, max_value=num_paginas, value=1, key="pag_crypto")
-            page_info = doc_info[pagina_firma - 1]
-            max_width = float(page_info.rect.width)
-            max_height = float(page_info.rect.height)
-            doc_info.close()
-
             if archivo_firma:
                 firma_img = Image.open(archivo_firma).convert("RGBA")
                 quitar_fondo = st.checkbox("Quitar fondo blanco", key="fondo_crypto", value=True)
@@ -438,6 +456,10 @@ elif opcion == "Firmar PDF":
             rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
 
             st.write("### Vista Previa Interactiva")
+            
+            # --- SELECTOR SUPERIOR ---
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_top", on_change=sync_pag_dig_top)
+            
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
@@ -455,6 +477,10 @@ elif opcion == "Firmar PDF":
                     st.session_state.firma_y = float(coords["y"]) / 1.5
                     st.rerun()
             doc_preview.close()
+            
+            # --- SELECTOR INFERIOR ---
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_bot", on_change=sync_pag_dig_bot)
+            
             st.write("---")
 
         if archivo_p12 and password_certificado:
