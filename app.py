@@ -204,7 +204,7 @@ elif opcion == "Firmar PDF":
     # --- FUNCIÓN MAESTRA DE DIBUJO ---
     def dibujar_bloque_firma(page, rect, img_bytes, datos, font_size):
         if datos and any(datos.values()): 
-            page.draw_rect(rect, color=(0.4, 0.4, 0.4), width=1.0)
+            # Se eliminó la línea page.draw_rect() para quitar el recuadro
             
             if img_bytes:
                 img_rect = fitz.Rect(rect.x0 + 5, rect.y0 + 5, rect.x0 + (rect.width * 0.35), rect.y1 - 5)
@@ -260,7 +260,7 @@ elif opcion == "Firmar PDF":
             incluir_texto = st.checkbox("📝 Añadir datos de texto junto a la rúbrica (Estilo bloque profesional)", value=False, key="check_texto_vis")
             
             datos_texto_firma = {}
-            tamano_fuente = 8.5
+            tamano_fuente = 3.0
             
             if incluir_texto:
                 st.write("### Datos del Firmante")
@@ -273,7 +273,7 @@ elif opcion == "Firmar PDF":
                     correo_firma = st.text_input("Correo electrónico:", "", key="cor_vis")
                     telefono_firma = st.text_input("Número de teléfono:", "", key="tel_vis")
                     mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_vis")
-                    tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 4.0, 16.0, 8.5, 0.5, key="font_vis")
+                    tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_vis")
 
                 datos_texto_firma = {
                     "nombre": nombre_firmante,
@@ -377,7 +377,7 @@ elif opcion == "Firmar PDF":
         rect_firma = None
         pagina_firma = 1
         datos_texto_firma = {}
-        tamano_fuente = 8.5
+        tamano_fuente = 3.0
 
         if incluir_rubrica and pdf_bytes:
             st.write("---")
@@ -391,7 +391,7 @@ elif opcion == "Firmar PDF":
                 correo_firma = st.text_input("Correo electrónico:", "", key="cor_dig")
                 telefono_firma = st.text_input("Número de teléfono:", "", key="tel_dig")
                 mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_dig")
-                tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 4.0, 16.0, 8.5, 0.5, key="font_dig")
+                tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_dig")
 
             datos_texto_firma = {
                 "nombre": nombre_firmante,
@@ -532,7 +532,9 @@ elif opcion == "Firmar PDF":
                             try:
                                 os.remove(ruta_p12)
                             except Exception:
-                                pass# ==========================================
+                                pass
+                                
+# ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
 # ==========================================
 elif opcion == "Editar y Rellenar PDF":
