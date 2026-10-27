@@ -159,9 +159,36 @@ elif opcion == "Firmar PDF":
     import datetime
     import uuid
     import subprocess
+    import json
+    import base64
+    from io import BytesIO
+    from PIL import Image
     
     st.header("✍️ Firmar Documento (Soporta PDF y Word)")
     
+    # --- INICIALIZACIÓN DE VARIABLES PARA PLANTILLAS (Evita errores de sesión) ---
+    def init_keys(prefix):
+        defaults = {
+            f"check_texto_{prefix}": False if prefix == "vis" else True,
+            f"nom_{prefix}": "David Moisés Lagos Riaño",
+            f"mot_{prefix}": "Soy el autor de este documento" if prefix=="dig" else "Aprobación de documento",
+            f"ciu_{prefix}": "Bogotá, Colombia",
+            f"cor_{prefix}": "davidmlrdvm@gmail.com",
+            f"tel_{prefix}": "3007351747",
+            f"fec_{prefix}": True,
+            f"font_{prefix}": 3.0,
+            f"ancho_{prefix}": 280.0,
+            f"alto_{prefix}": 80.0,
+            f"fondo_{prefix}": True,
+            f"img_perfil_{prefix}": None
+        }
+        for k, v in defaults.items():
+            if k not in st.session_state:
+                st.session_state[k] = v
+
+    init_keys("vis")
+    init_keys("dig")
+
     # Inicializar variables de estado para sincronizar selectores de página
     if "pag_vis" not in st.session_state: st.session_state.pag_vis = 1
     def sync_pag_vis_top(): st.session_state.pag_vis = st.session_state.pag_vis_top
@@ -256,7 +283,6 @@ elif opcion == "Firmar PDF":
             doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
             num_paginas = len(doc_info)
             
-            # Sincronización de límite de páginas
             if st.session_state.pag_vis > num_paginas: st.session_state.pag_vis = num_paginas
             pagina_firma = st.session_state.pag_vis
             
@@ -266,40 +292,41 @@ elif opcion == "Firmar PDF":
             doc_info.close()
 
             st.write("---")
-            incluir_texto = st.checkbox("📝 Añadir datos de texto junto a la rúbrica", value=False, key="check_texto_vis")
+            st.checkbox("📝 Añadir datos de texto junto a la rúbrica", key="check_texto_vis")
             
             datos_texto_firma = {}
-            tamano_fuente = 3.0
-            
-            if incluir_texto:
+            if st.session_state.check_texto_vis:
                 st.write("### Datos del Firmante")
                 col_d1, col_d2 = st.columns(2)
                 with col_d1:
-                    nombre_firmante = st.text_input("Nombre completo:", "David Moisés Lagos Riaño", key="nom_vis")
-                    motivo_firma = st.text_input("Motivo de la firma:", "Aprobación de documento", key="mot_vis")
-                    ciudad_firma = st.text_input("Ciudad / Ubicación:", "Bogotá, Colombia", key="ciu_vis")
+                    st.text_input("Nombre completo:", key="nom_vis")
+                    st.text_input("Motivo de la firma:", key="mot_vis")
+                    st.text_input("Ciudad / Ubicación:", key="ciu_vis")
                 with col_d2:
-                    correo_firma = st.text_input("Correo electrónico:", "davidmlrdvm@gmail.com", key="cor_vis")
-                    telefono_firma = st.text_input("Número de teléfono:", "3007351747", key="tel_vis")
-                    mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_vis")
-                    tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_vis")
+                    st.text_input("Correo electrónico:", key="cor_vis")
+                    st.text_input("Número de teléfono:", key="tel_vis")
+                    st.checkbox("Incluir Fecha y Hora actual", key="fec_vis")
+                    st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, step=0.5, key="font_vis")
 
                 datos_texto_firma = {
-                    "nombre": nombre_firmante,
-                    "motivo": motivo_firma,
-                    "ciudad": ciudad_firma,
-                    "correo": correo_firma,
-                    "telefono": telefono_firma,
-                    "fecha": mostrar_fecha
+                    "nombre": st.session_state.nom_vis,
+                    "motivo": st.session_state.mot_vis,
+                    "ciudad": st.session_state.ciu_vis,
+                    "correo": st.session_state.cor_vis,
+                    "telefono": st.session_state.tel_vis,
+                    "fecha": st.session_state.fec_vis
                 }
 
             archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Opcional si usas texto)", type=["png", "jpg", "jpeg"], key="img_firma_vis")
             firma_bytes = None
-            if archivo_firma:
-                firma_img = Image.open(archivo_firma).convert("RGBA")
-                quitar_fondo = st.checkbox("Quitar fondo blanco de la firma", value=True, key="fondo_vis")
+            
+            img_source = archivo_firma if archivo_firma else (BytesIO(st.session_state.img_perfil_vis) if st.session_state.img_perfil_vis else None)
+            
+            if img_source:
+                firma_img = Image.open(img_source).convert("RGBA")
+                st.checkbox("Quitar fondo blanco de la firma", key="fondo_vis")
                 
-                if quitar_fondo:
+                if st.session_state.fondo_vis:
                     datas = firma_img.getdata()
                     newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
                     firma_img.putdata(newData)
@@ -310,8 +337,8 @@ elif opcion == "Firmar PDF":
                 
             st.write("### Ajustes del Bloque / Imagen")
             col_t1, col_t2 = st.columns(2)
-            with col_t1: ancho_firma = st.slider("Ancho", 10.0, 600.0, 280.0 if incluir_texto else 150.0, key="ancho_vis")
-            with col_t2: alto_firma = st.slider("Alto", 10.0, 300.0, 80.0 if incluir_texto else 50.0, key="alto_vis")
+            with col_t1: ancho_firma = st.slider("Ancho", 10.0, 600.0, key="ancho_vis")
+            with col_t2: alto_firma = st.slider("Alto", 10.0, 300.0, key="alto_vis")
                 
             col_p1, col_p2 = st.columns(2)
             with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
@@ -321,13 +348,12 @@ elif opcion == "Firmar PDF":
             
             st.write("### Vista Previa Interactiva")
             
-            # --- SELECTOR SUPERIOR ---
             st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_vis_top", on_change=sync_pag_vis_top)
             
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
-            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
+            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_vis)
             
             pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -342,21 +368,75 @@ elif opcion == "Firmar PDF":
                     st.rerun()
             doc_preview.close()
             
-            # --- SELECTOR INFERIOR ---
             st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_vis_bot", on_change=sync_pag_vis_bot)
             
+            # --- PANEL DE GUARDAR / CARGAR PLANTILLA ---
+            st.write("---")
+            st.write("### ⚙️ Plantilla de Firma (Guardar / Cargar)")
+            col_load, col_save = st.columns(2)
+            with col_load:
+                with st.expander("📁 Cargar plantilla guardada (.json)"):
+                    perfil_subido = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_vis")
+                    if st.button("Aplicar Plantilla", key="btn_apply_vis") and perfil_subido:
+                        try:
+                            data = json.load(perfil_subido)
+                            st.session_state.check_texto_vis = data.get("incluir_texto", st.session_state.check_texto_vis)
+                            st.session_state.nom_vis = data.get("nombre", st.session_state.nom_vis)
+                            st.session_state.mot_vis = data.get("motivo", st.session_state.mot_vis)
+                            st.session_state.ciu_vis = data.get("ciudad", st.session_state.ciu_vis)
+                            st.session_state.cor_vis = data.get("correo", st.session_state.cor_vis)
+                            st.session_state.tel_vis = data.get("telefono", st.session_state.tel_vis)
+                            st.session_state.fec_vis = data.get("fecha", st.session_state.fec_vis)
+                            st.session_state.font_vis = data.get("font_size", st.session_state.font_vis)
+                            st.session_state.ancho_vis = float(data.get("ancho", st.session_state.ancho_vis))
+                            st.session_state.alto_vis = float(data.get("alto", st.session_state.alto_vis))
+                            st.session_state.fondo_vis = data.get("quitar_fondo", st.session_state.fondo_vis)
+                            if data.get("imagen_b64"):
+                                st.session_state.img_perfil_vis = base64.b64decode(data["imagen_b64"])
+                            else:
+                                st.session_state.img_perfil_vis = None
+                            st.success("Plantilla aplicada. La página se actualizará...")
+                            st.rerun()
+                        except Exception as e:
+                            st.error("Error al cargar la plantilla.")
+            with col_save:
+                with st.expander("💾 Guardar configuración actual"):
+                    img_to_save = archivo_firma.getvalue() if archivo_firma else st.session_state.img_perfil_vis
+                    perfil_data = {
+                        "incluir_texto": st.session_state.check_texto_vis,
+                        "nombre": st.session_state.nom_vis,
+                        "motivo": st.session_state.mot_vis,
+                        "ciudad": st.session_state.ciu_vis,
+                        "correo": st.session_state.cor_vis,
+                        "telefono": st.session_state.tel_vis,
+                        "fecha": st.session_state.fec_vis,
+                        "font_size": st.session_state.font_vis,
+                        "ancho": st.session_state.ancho_vis,
+                        "alto": st.session_state.alto_vis,
+                        "quitar_fondo": st.session_state.fondo_vis,
+                        "imagen_b64": base64.b64encode(img_to_save).decode("utf-8") if img_to_save else None
+                    }
+                    st.download_button(
+                        label="⬇️ Descargar plantilla (.json)",
+                        data=json.dumps(perfil_data, indent=4),
+                        file_name="plantilla_firma_visual.json",
+                        mime="application/json",
+                        key="down_prof_vis"
+                    )
+
+            st.write("---")
             st.write("### Opciones de Seguridad")
             bloquear_pdf = st.checkbox("🔒 Bloquear PDF contra modificaciones (Impide que se borre la firma)", key="block_vis")
 
             if st.button("Aplicar Firma y Descargar"):
-                if not firma_bytes and not incluir_texto:
+                if not firma_bytes and not st.session_state.check_texto_vis:
                     st.warning("Debes subir una imagen o habilitar el texto para poder firmar.")
                 else:
                     with st.spinner("Procesando documento final..."):
                         doc_final = fitz.open(stream=pdf_bytes, filetype="pdf")
                         page_final = doc_final[pagina_firma - 1]
                         
-                        dibujar_bloque_firma(page_final, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
+                        dibujar_bloque_firma(page_final, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_vis)
                         
                         salida_pdf = BytesIO()
                         if bloquear_pdf:
@@ -388,14 +468,13 @@ elif opcion == "Firmar PDF":
 
         password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
 
-        incluir_rubrica = st.checkbox("✒️ Añadir bloque de firma profesional (Rúbrica + Datos textuales)", value=True, key="check_rubrica_dig")
+        st.checkbox("✒️ Añadir bloque de firma profesional (Rúbrica + Datos textuales)", key="check_texto_dig")
         firma_bytes = None
         rect_firma = None
         pagina_firma = 1
         datos_texto_firma = {}
-        tamano_fuente = 3.0
 
-        if incluir_rubrica and pdf_bytes:
+        if st.session_state.check_texto_dig and pdf_bytes:
             
             doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
             num_paginas = len(doc_info)
@@ -411,31 +490,33 @@ elif opcion == "Firmar PDF":
             st.write("### Datos del Firmante")
             col_d1, col_d2 = st.columns(2)
             with col_d1:
-                nombre_firmante = st.text_input("Nombre completo:", "David Moisés Lagos Riaño", key="nom_dig")
-                motivo_firma = st.text_input("Motivo de la firma:", "Soy el autor de este documento", key="mot_dig")
-                ciudad_firma = st.text_input("Ciudad / Ubicación:", "Bogotá, Colombia", key="ciu_dig")
+                st.text_input("Nombre completo:", key="nom_dig")
+                st.text_input("Motivo de la firma:", key="mot_dig")
+                st.text_input("Ciudad / Ubicación:", key="ciu_dig")
             with col_d2:
-                correo_firma = st.text_input("Correo electrónico:", "davidmlrdvm@gmail.com", key="cor_dig")
-                telefono_firma = st.text_input("Número de teléfono:", "3007351747", key="tel_dig")
-                mostrar_fecha = st.checkbox("Incluir Fecha y Hora actual", value=True, key="fec_dig")
-                tamano_fuente = st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, 3.0, 0.5, key="font_dig")
+                st.text_input("Correo electrónico:", key="cor_dig")
+                st.text_input("Número de teléfono:", key="tel_dig")
+                st.checkbox("Incluir Fecha y Hora actual", key="fec_dig")
+                st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, step=0.5, key="font_dig")
 
             datos_texto_firma = {
-                "nombre": nombre_firmante,
-                "motivo": motivo_firma,
-                "ciudad": ciudad_firma,
-                "correo": correo_firma,
-                "telefono": telefono_firma,
-                "fecha": mostrar_fecha
+                "nombre": st.session_state.nom_dig,
+                "motivo": st.session_state.mot_dig,
+                "ciudad": st.session_state.ciu_dig,
+                "correo": st.session_state.cor_dig,
+                "telefono": st.session_state.tel_dig,
+                "fecha": st.session_state.fec_dig
             }
 
-            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_rubrica_crypto")
+            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_firma_dig")
             
-            if archivo_firma:
-                firma_img = Image.open(archivo_firma).convert("RGBA")
-                quitar_fondo = st.checkbox("Quitar fondo blanco", key="fondo_crypto", value=True)
+            img_source = archivo_firma if archivo_firma else (BytesIO(st.session_state.img_perfil_dig) if st.session_state.img_perfil_dig else None)
+            
+            if img_source:
+                firma_img = Image.open(img_source).convert("RGBA")
+                st.checkbox("Quitar fondo blanco", key="fondo_dig")
                 
-                if quitar_fondo:
+                if st.session_state.fondo_dig:
                     datas = firma_img.getdata()
                     newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
                     firma_img.putdata(newData)
@@ -446,8 +527,8 @@ elif opcion == "Firmar PDF":
             
             st.write("### Ajuste del Bloque de Firma")
             col_t1, col_t2 = st.columns(2)
-            with col_t1: ancho_firma = st.slider("Ancho del bloque", 100.0, 600.0, 280.0, key="ancho_crypto")
-            with col_t2: alto_firma = st.slider("Alto del bloque", 30.0, 300.0, 80.0, key="alto_crypto")
+            with col_t1: ancho_firma = st.slider("Ancho del bloque", 10.0, 600.0, key="ancho_dig")
+            with col_t2: alto_firma = st.slider("Alto del bloque", 10.0, 300.0, key="alto_dig")
                 
             col_p1, col_p2 = st.columns(2)
             with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
@@ -457,13 +538,12 @@ elif opcion == "Firmar PDF":
 
             st.write("### Vista Previa Interactiva")
             
-            # --- SELECTOR SUPERIOR ---
             st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_top", on_change=sync_pag_dig_top)
             
             doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_preview = doc_preview[pagina_firma - 1]
             
-            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
+            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_dig)
             
             pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -478,9 +558,62 @@ elif opcion == "Firmar PDF":
                     st.rerun()
             doc_preview.close()
             
-            # --- SELECTOR INFERIOR ---
             st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_bot", on_change=sync_pag_dig_bot)
             
+            # --- PANEL DE GUARDAR / CARGAR PLANTILLA ---
+            st.write("---")
+            st.write("### ⚙️ Plantilla de Firma (Guardar / Cargar)")
+            col_load, col_save = st.columns(2)
+            with col_load:
+                with st.expander("📁 Cargar plantilla guardada (.json)"):
+                    perfil_subido_dig = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_dig")
+                    if st.button("Aplicar Plantilla", key="btn_apply_dig") and perfil_subido_dig:
+                        try:
+                            data = json.load(perfil_subido_dig)
+                            st.session_state.check_texto_dig = data.get("incluir_texto", st.session_state.check_texto_dig)
+                            st.session_state.nom_dig = data.get("nombre", st.session_state.nom_dig)
+                            st.session_state.mot_dig = data.get("motivo", st.session_state.mot_dig)
+                            st.session_state.ciu_dig = data.get("ciudad", st.session_state.ciu_dig)
+                            st.session_state.cor_dig = data.get("correo", st.session_state.cor_dig)
+                            st.session_state.tel_dig = data.get("telefono", st.session_state.tel_dig)
+                            st.session_state.fec_dig = data.get("fecha", st.session_state.fec_dig)
+                            st.session_state.font_dig = data.get("font_size", st.session_state.font_dig)
+                            st.session_state.ancho_dig = float(data.get("ancho", st.session_state.ancho_dig))
+                            st.session_state.alto_dig = float(data.get("alto", st.session_state.alto_dig))
+                            st.session_state.fondo_dig = data.get("quitar_fondo", st.session_state.fondo_dig)
+                            if data.get("imagen_b64"):
+                                st.session_state.img_perfil_dig = base64.b64decode(data["imagen_b64"])
+                            else:
+                                st.session_state.img_perfil_dig = None
+                            st.success("Plantilla aplicada. La página se actualizará...")
+                            st.rerun()
+                        except Exception as e:
+                            st.error("Error al cargar la plantilla.")
+            with col_save:
+                with st.expander("💾 Guardar configuración actual"):
+                    img_to_save = archivo_firma.getvalue() if archivo_firma else st.session_state.img_perfil_dig
+                    perfil_data = {
+                        "incluir_texto": st.session_state.check_texto_dig,
+                        "nombre": st.session_state.nom_dig,
+                        "motivo": st.session_state.mot_dig,
+                        "ciudad": st.session_state.ciu_dig,
+                        "correo": st.session_state.cor_dig,
+                        "telefono": st.session_state.tel_dig,
+                        "fecha": st.session_state.fec_dig,
+                        "font_size": st.session_state.font_dig,
+                        "ancho": st.session_state.ancho_dig,
+                        "alto": st.session_state.alto_dig,
+                        "quitar_fondo": st.session_state.fondo_dig,
+                        "imagen_b64": base64.b64encode(img_to_save).decode("utf-8") if img_to_save else None
+                    }
+                    st.download_button(
+                        label="⬇️ Descargar plantilla (.json)",
+                        data=json.dumps(perfil_data, indent=4),
+                        file_name="plantilla_firma_digital.json",
+                        mime="application/json",
+                        key="down_prof_dig"
+                    )
+
             st.write("---")
 
         if archivo_p12 and password_certificado:
@@ -516,11 +649,11 @@ elif opcion == "Firmar PDF":
                             passphrase=password_bytes
                         )
                         
-                        if incluir_rubrica and rect_firma:
+                        if st.session_state.check_texto_dig and rect_firma:
                             doc_visual = fitz.open(stream=pdf_bytes, filetype="pdf")
                             page_visual = doc_visual[pagina_firma - 1]
                             
-                            dibujar_bloque_firma(page_visual, rect_firma, firma_bytes, datos_texto_firma, tamano_fuente)
+                            dibujar_bloque_firma(page_visual, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_dig)
                             
                             pdf_base = BytesIO()
                             doc_visual.save(pdf_base)
@@ -558,8 +691,7 @@ elif opcion == "Firmar PDF":
                             try:
                                 os.remove(ruta_p12)
                             except Exception:
-                                pass
-                                
+                                pass                                
 # ==========================================
 # MÓDULO 5: EDITAR Y RELLENAR PDF
 # ==========================================
