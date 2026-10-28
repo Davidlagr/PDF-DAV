@@ -271,7 +271,6 @@ elif opcion == "Firmar PDF":
             if img_bytes:
                 page.insert_image(rect, stream=img_bytes, keep_proportion=False)
 
-
     tipo_firma = st.radio("Elige el tipo de firma:", ["Firma Visual (Imagen y/o Texto en el documento)", "Firma Digital Criptográfica (Archivo .p12 / .pfx)"])
     
     # ---------------------------------------------------------
@@ -380,11 +379,9 @@ elif opcion == "Firmar PDF":
                     perfil_subido = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_vis")
                     if st.button("Aplicar Plantilla", key="btn_apply_vis") and perfil_subido:
                         try:
-                            # 1. Decodificar explícitamente los bytes a texto UTF-8 para evitar TypeErrors
                             texto_json = perfil_subido.getvalue().decode("utf-8")
                             data = json.loads(texto_json)
                             
-                            # 2. Forzar los tipos de datos exactos (bool, str, float)
                             st.session_state.check_texto_vis = bool(data.get("incluir_texto", st.session_state.check_texto_vis))
                             st.session_state.nom_vis = str(data.get("nombre", st.session_state.nom_vis))
                             st.session_state.mot_vis = str(data.get("motivo", st.session_state.mot_vis))
@@ -455,6 +452,254 @@ elif opcion == "Firmar PDF":
                         doc_final.close()
                         st.success("¡Firma aplicada con éxito!")
                         st.download_button(label="Descargar Documento Firmado", data=salida_pdf.getvalue(), file_name=f"firmado_{nombre_pdf}", mime="application/pdf")
+    
+    # ---------------------------------------------------------
+    # RAMA 2: FIRMA DIGITAL CRIPTOGRÁFICA
+    # ---------------------------------------------------------
+    else:
+        st.info("Aplica una firma digital con validez legal subiendo tu certificado PKCS#12 (.p12 o .pfx).")
+        
+        col_firma1, col_firma2 = st.columns(2)
+        with col_firma1:
+            archivo_subido = st.file_uploader("1. Sube el documento a firmar (PDF o Word)", type=["pdf", "docx"], key="pdf_crypto")
+        with col_firma2:
+            archivo_p12 = st.file_uploader("2. Sube tu certificado (.p12 / .pfx)", type=["p12", "pfx"])
+        
+        pdf_bytes = None
+        nombre_pdf = ""
+        if archivo_subido:
+            pdf_bytes, nombre_pdf = procesar_archivo_subido(archivo_subido, "dig")
+
+        password_certificado = st.text_input("3. Contraseña del certificado:", type="password")
+
+        st.checkbox("✒️ Añadir bloque de firma profesional (Rúbrica + Datos textuales)", key="check_texto_dig")
+        firma_bytes = None
+        rect_firma = None
+        pagina_firma = 1
+        datos_texto_firma = {}
+
+        if st.session_state.check_texto_dig and pdf_bytes:
+            
+            doc_info = fitz.open(stream=pdf_bytes, filetype="pdf")
+            num_paginas = len(doc_info)
+            if st.session_state.pag_dig > num_paginas: st.session_state.pag_dig = num_paginas
+            pagina_firma = st.session_state.pag_dig
+            
+            page_info = doc_info[pagina_firma - 1]
+            max_width = float(page_info.rect.width)
+            max_height = float(page_info.rect.height)
+            doc_info.close()
+            
+            st.write("---")
+            st.write("### Datos del Firmante")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                st.text_input("Nombre completo:", key="nom_dig")
+                st.text_input("Motivo de la firma:", key="mot_dig")
+                st.text_input("Ciudad / Ubicación:", key="ciu_dig")
+            with col_d2:
+                st.text_input("Correo electrónico:", key="cor_dig")
+                st.text_input("Número de teléfono:", key="tel_dig")
+                st.checkbox("Incluir Fecha y Hora actual", key="fec_dig")
+                st.slider("Tamaño de la letra (Fuente)", 2.0, 16.0, step=0.5, key="font_dig")
+
+            datos_texto_firma = {
+                "nombre": st.session_state.nom_dig,
+                "motivo": st.session_state.mot_dig,
+                "ciudad": st.session_state.ciu_dig,
+                "correo": st.session_state.cor_dig,
+                "telefono": st.session_state.tel_dig,
+                "fecha": st.session_state.fec_dig
+            }
+
+            archivo_firma = st.file_uploader("Sube la imagen de tu rúbrica (Recomendado)", type=["png", "jpg", "jpeg"], key="img_firma_dig")
+            
+            img_source = archivo_firma if archivo_firma else (BytesIO(st.session_state.img_perfil_dig) if st.session_state.img_perfil_dig else None)
+            
+            if img_source:
+                firma_img = Image.open(img_source).convert("RGBA")
+                st.checkbox("Quitar fondo blanco", key="fondo_dig")
+                
+                if st.session_state.fondo_dig:
+                    datas = firma_img.getdata()
+                    newData = [(255, 255, 255, 0) if item[:3] == (255, 255, 255) or (item[0]>200 and item[1]>200 and item[2]>200) else item for item in datas]
+                    firma_img.putdata(newData)
+                
+                img_byte_arr = BytesIO()
+                firma_img.save(img_byte_arr, format='PNG')
+                firma_bytes = img_byte_arr.getvalue()
+            
+            st.write("### Ajuste del Bloque de Firma")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1: ancho_firma = st.slider("Ancho del bloque", 10.0, 600.0, key="ancho_dig")
+            with col_t2: alto_firma = st.slider("Alto del bloque", 10.0, 300.0, key="alto_dig")
+                
+            col_p1, col_p2 = st.columns(2)
+            with col_p1: st.slider("Horizontal (X)", 0.0, max_width, value=st.session_state.firma_x, key="slider_firma_x", on_change=update_firma_pos)
+            with col_p2: st.slider("Vertical (Y)", 0.0, max_height, value=st.session_state.firma_y, key="slider_firma_y", on_change=update_firma_pos)
+
+            rect_firma = fitz.Rect(st.session_state.firma_x, st.session_state.firma_y, st.session_state.firma_x + ancho_firma, st.session_state.firma_y + alto_firma)
+
+            st.write("### Vista Previa Interactiva")
+            
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_top", on_change=sync_pag_dig_top)
+            
+            doc_preview = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_preview = doc_preview[pagina_firma - 1]
+            
+            dibujar_bloque_firma(page_preview, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_dig)
+            
+            pix = page_preview.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            img_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            coords = streamlit_image_coordinates(img_pil, key="click_crypto_prev")
+            if coords is not None:
+                click_id = f"{coords['x']}-{coords['y']}"
+                if st.session_state.last_click_firma != click_id:
+                    st.session_state.last_click_firma = click_id
+                    st.session_state.firma_x = float(coords["x"]) / 1.5
+                    st.session_state.firma_y = float(coords["y"]) / 1.5
+                    st.rerun()
+            doc_preview.close()
+            
+            st.number_input("Página a firmar:", min_value=1, max_value=max(1, num_paginas), value=pagina_firma, key="pag_dig_bot", on_change=sync_pag_dig_bot)
+            
+            # --- PANEL DE GUARDAR / CARGAR PLANTILLA (DIGITAL) ---
+            st.write("---")
+            st.write("### ⚙️ Plantilla de Firma (Guardar / Cargar)")
+            col_load, col_save = st.columns(2)
+            with col_load:
+                with st.expander("📁 Cargar plantilla guardada (.json)"):
+                    perfil_subido_dig = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_dig")
+                    if st.button("Aplicar Plantilla", key="btn_apply_dig") and perfil_subido_dig:
+                        try:
+                            texto_json = perfil_subido_dig.getvalue().decode("utf-8")
+                            data = json.loads(texto_json)
+                            
+                            st.session_state.check_texto_dig = bool(data.get("incluir_texto", st.session_state.check_texto_dig))
+                            st.session_state.nom_dig = str(data.get("nombre", st.session_state.nom_dig))
+                            st.session_state.mot_dig = str(data.get("motivo", st.session_state.mot_dig))
+                            st.session_state.ciu_dig = str(data.get("ciudad", st.session_state.ciu_dig))
+                            st.session_state.cor_dig = str(data.get("correo", st.session_state.cor_dig))
+                            st.session_state.tel_dig = str(data.get("telefono", st.session_state.tel_dig))
+                            st.session_state.fec_dig = bool(data.get("fecha", st.session_state.fec_dig))
+                            st.session_state.font_dig = float(data.get("font_size", st.session_state.font_dig))
+                            st.session_state.ancho_dig = float(data.get("ancho", st.session_state.ancho_dig))
+                            st.session_state.alto_dig = float(data.get("alto", st.session_state.alto_dig))
+                            st.session_state.fondo_dig = bool(data.get("quitar_fondo", st.session_state.fondo_dig))
+                            
+                            if data.get("imagen_b64"):
+                                st.session_state.img_perfil_dig = base64.b64decode(data["imagen_b64"])
+                            else:
+                                st.session_state.img_perfil_dig = None
+                                
+                            st.success("Plantilla aplicada con éxito. Actualizando vista...")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error técnico al cargar: {str(e)}")
+            with col_save:
+                with st.expander("💾 Guardar configuración actual"):
+                    img_to_save = archivo_firma.getvalue() if archivo_firma else st.session_state.img_perfil_dig
+                    perfil_data = {
+                        "incluir_texto": st.session_state.check_texto_dig,
+                        "nombre": st.session_state.nom_dig,
+                        "motivo": st.session_state.mot_dig,
+                        "ciudad": st.session_state.ciu_dig,
+                        "correo": st.session_state.cor_dig,
+                        "telefono": st.session_state.tel_dig,
+                        "fecha": st.session_state.fec_dig,
+                        "font_size": st.session_state.font_dig,
+                        "ancho": st.session_state.ancho_dig,
+                        "alto": st.session_state.alto_dig,
+                        "quitar_fondo": st.session_state.fondo_dig,
+                        "imagen_b64": base64.b64encode(img_to_save).decode("utf-8") if img_to_save else None
+                    }
+                    st.download_button(
+                        label="⬇️ Descargar plantilla (.json)",
+                        data=json.dumps(perfil_data, indent=4),
+                        file_name="plantilla_firma_digital.json",
+                        mime="application/json",
+                        key="down_prof_dig"
+                    )
+
+            st.write("---")
+
+        if archivo_p12 and password_certificado:
+            if st.button("Diagnosticar Certificado"):
+                try:
+                    from cryptography.hazmat.primitives.serialization import pkcs12
+                    private_key, cert, extras = pkcs12.load_key_and_certificates(
+                        archivo_p12.getvalue(),
+                        password_certificado.encode("utf-8")
+                    )
+                    st.success("Certificado cargado correctamente")
+                    st.write("Clave privada:", private_key is not None)
+                    st.write("Certificado:", cert is not None)
+                    if cert:
+                        st.code(str(cert.subject))
+                except Exception as e:
+                    st.error(f"ERROR REAL: {str(e)}")
+                    st.code(traceback.format_exc())
+
+        if archivo_subido and archivo_p12 and password_certificado:
+            if st.button("Firmar Documento Digitalmente", type="primary"):
+                with st.spinner("Procesando firma criptográfica..."):
+                    ruta_p12 = None
+                    try:
+                        password_bytes = password_certificado.encode("utf-8")
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".p12") as tmp_p12:
+                            tmp_p12.write(archivo_p12.getvalue())
+                            ruta_p12 = tmp_p12.name
+                            
+                        signer = signers.SimpleSigner.load_pkcs12(
+                            pfx_file=ruta_p12,
+                            passphrase=password_bytes
+                        )
+                        
+                        if st.session_state.check_texto_dig and rect_firma:
+                            doc_visual = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            page_visual = doc_visual[pagina_firma - 1]
+                            
+                            dibujar_bloque_firma(page_visual, rect_firma, firma_bytes, datos_texto_firma, st.session_state.font_dig)
+                            
+                            pdf_base = BytesIO()
+                            doc_visual.save(pdf_base)
+                            doc_visual.close()
+                        else:
+                            pdf_base = BytesIO(pdf_bytes)
+                        
+                        pdf_writer = IncrementalPdfFileWriter(pdf_base)
+                        campo_unico = f"FirmaDigitalLegal_{uuid.uuid4().hex[:8]}"
+                        
+                        signers.sign_pdf(
+                            pdf_writer, 
+                            signers.PdfSignatureMetadata(
+                                field_name=campo_unico,
+                                location=datos_texto_firma.get("ciudad", ""),
+                                reason=datos_texto_firma.get("motivo", "")
+                            ), 
+                            signer=signer, 
+                            in_place=True
+                        )
+                        
+                        st.success("¡PDF firmado correctamente con bloque visual y certificado digital!")
+                        st.download_button(
+                            label="⬇️ Descargar Documento Firmado",
+                            data=pdf_base.getvalue(),
+                            file_name=f"firmado_digital_{nombre_pdf}",
+                            mime="application/pdf"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"ERROR REAL: {str(e)}")
+                        st.code(traceback.format_exc())
+                    finally:
+                        if ruta_p12 and os.path.exists(ruta_p12):
+                            try:
+                                os.remove(ruta_p12)
+                            except Exception:
+                                pass
     
     # ---------------------------------------------------------
     # RAMA 2: FIRMA DIGITAL CRIPTOGRÁFICA
