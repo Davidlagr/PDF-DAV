@@ -167,7 +167,7 @@ elif opcion == "Firmar PDF":
     
     st.header("✍️ Firmar Documento (Soporta PDF y Word)")
     
-    # --- INICIALIZACIÓN DE VARIABLES PARA PLANTILLAS (Evita errores de sesión) ---
+    # --- INICIALIZACIÓN DE VARIABLES PARA PLANTILLAS ---
     def init_keys(prefix):
         defaults = {
             f"check_texto_{prefix}": False if prefix == "vis" else True,
@@ -189,6 +189,38 @@ elif opcion == "Firmar PDF":
 
     init_keys("vis")
     init_keys("dig")
+
+    # --- CALLBACKS PARA CARGAR PLANTILLAS (Evita el error de modificación de widgets) ---
+    def aplicar_plantilla(prefix):
+        file = st.session_state.get(f"load_prof_{prefix}")
+        if file is not None:
+            try:
+                texto_json = file.getvalue().decode("utf-8")
+                data = json.loads(texto_json)
+                
+                if "incluir_texto" in data: st.session_state[f"check_texto_{prefix}"] = bool(data["incluir_texto"])
+                if "nombre" in data: st.session_state[f"nom_{prefix}"] = str(data["nombre"])
+                if "motivo" in data: st.session_state[f"mot_{prefix}"] = str(data["motivo"])
+                if "ciudad" in data: st.session_state[f"ciu_{prefix}"] = str(data["ciudad"])
+                if "correo" in data: st.session_state[f"cor_{prefix}"] = str(data["correo"])
+                if "telefono" in data: st.session_state[f"tel_{prefix}"] = str(data["telefono"])
+                if "fecha" in data: st.session_state[f"fec_{prefix}"] = bool(data["fecha"])
+                if "font_size" in data: st.session_state[f"font_{prefix}"] = float(data["font_size"])
+                if "ancho" in data: st.session_state[f"ancho_{prefix}"] = float(data["ancho"])
+                if "alto" in data: st.session_state[f"alto_{prefix}"] = float(data["alto"])
+                if "quitar_fondo" in data: st.session_state[f"fondo_{prefix}"] = bool(data["quitar_fondo"])
+                
+                if "imagen_b64" in data and data["imagen_b64"]:
+                    st.session_state[f"img_perfil_{prefix}"] = base64.b64decode(data["imagen_b64"])
+                else:
+                    st.session_state[f"img_perfil_{prefix}"] = None
+                
+                st.session_state.msg_exito = "¡Plantilla cargada exitosamente!"
+            except Exception as e:
+                st.session_state.msg_error = f"Error al cargar plantilla: {str(e)}"
+                
+    def cb_aplicar_vis(): aplicar_plantilla("vis")
+    def cb_aplicar_dig(): aplicar_plantilla("dig")
 
     # Inicializar variables de estado para sincronizar selectores de página
     if "pag_vis" not in st.session_state: st.session_state.pag_vis = 1
@@ -270,6 +302,15 @@ elif opcion == "Firmar PDF":
         else:
             if img_bytes:
                 page.insert_image(rect, stream=img_bytes, keep_proportion=False)
+
+
+    # Mostrar alertas globales de las plantillas (si las hay)
+    if "msg_exito" in st.session_state:
+        st.success(st.session_state.msg_exito)
+        del st.session_state.msg_exito
+    if "msg_error" in st.session_state:
+        st.error(st.session_state.msg_error)
+        del st.session_state.msg_error
 
     tipo_firma = st.radio("Elige el tipo de firma:", ["Firma Visual (Imagen y/o Texto en el documento)", "Firma Digital Criptográfica (Archivo .p12 / .pfx)"])
     
@@ -376,33 +417,9 @@ elif opcion == "Firmar PDF":
             col_load, col_save = st.columns(2)
             with col_load:
                 with st.expander("📁 Cargar plantilla guardada (.json)"):
-                    perfil_subido = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_vis")
-                    if st.button("Aplicar Plantilla", key="btn_apply_vis") and perfil_subido:
-                        try:
-                            texto_json = perfil_subido.getvalue().decode("utf-8")
-                            data = json.loads(texto_json)
-                            
-                            st.session_state.check_texto_vis = bool(data.get("incluir_texto", st.session_state.check_texto_vis))
-                            st.session_state.nom_vis = str(data.get("nombre", st.session_state.nom_vis))
-                            st.session_state.mot_vis = str(data.get("motivo", st.session_state.mot_vis))
-                            st.session_state.ciu_vis = str(data.get("ciudad", st.session_state.ciu_vis))
-                            st.session_state.cor_vis = str(data.get("correo", st.session_state.cor_vis))
-                            st.session_state.tel_vis = str(data.get("telefono", st.session_state.tel_vis))
-                            st.session_state.fec_vis = bool(data.get("fecha", st.session_state.fec_vis))
-                            st.session_state.font_vis = float(data.get("font_size", st.session_state.font_vis))
-                            st.session_state.ancho_vis = float(data.get("ancho", st.session_state.ancho_vis))
-                            st.session_state.alto_vis = float(data.get("alto", st.session_state.alto_vis))
-                            st.session_state.fondo_vis = bool(data.get("quitar_fondo", st.session_state.fondo_vis))
-                            
-                            if data.get("imagen_b64"):
-                                st.session_state.img_perfil_vis = base64.b64decode(data["imagen_b64"])
-                            else:
-                                st.session_state.img_perfil_vis = None
-                                
-                            st.success("Plantilla aplicada con éxito. Actualizando vista...")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error técnico al cargar: {str(e)}")
+                    st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_vis")
+                    # Usamos el callback aquí para evitar el error de modificación de widget
+                    st.button("Aplicar Plantilla", key="btn_apply_vis", on_click=cb_aplicar_vis)
             with col_save:
                 with st.expander("💾 Guardar configuración actual"):
                     img_to_save = archivo_firma.getvalue() if archivo_firma else st.session_state.img_perfil_vis
@@ -570,33 +587,9 @@ elif opcion == "Firmar PDF":
             col_load, col_save = st.columns(2)
             with col_load:
                 with st.expander("📁 Cargar plantilla guardada (.json)"):
-                    perfil_subido_dig = st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_dig")
-                    if st.button("Aplicar Plantilla", key="btn_apply_dig") and perfil_subido_dig:
-                        try:
-                            texto_json = perfil_subido_dig.getvalue().decode("utf-8")
-                            data = json.loads(texto_json)
-                            
-                            st.session_state.check_texto_dig = bool(data.get("incluir_texto", st.session_state.check_texto_dig))
-                            st.session_state.nom_dig = str(data.get("nombre", st.session_state.nom_dig))
-                            st.session_state.mot_dig = str(data.get("motivo", st.session_state.mot_dig))
-                            st.session_state.ciu_dig = str(data.get("ciudad", st.session_state.ciu_dig))
-                            st.session_state.cor_dig = str(data.get("correo", st.session_state.cor_dig))
-                            st.session_state.tel_dig = str(data.get("telefono", st.session_state.tel_dig))
-                            st.session_state.fec_dig = bool(data.get("fecha", st.session_state.fec_dig))
-                            st.session_state.font_dig = float(data.get("font_size", st.session_state.font_dig))
-                            st.session_state.ancho_dig = float(data.get("ancho", st.session_state.ancho_dig))
-                            st.session_state.alto_dig = float(data.get("alto", st.session_state.alto_dig))
-                            st.session_state.fondo_dig = bool(data.get("quitar_fondo", st.session_state.fondo_dig))
-                            
-                            if data.get("imagen_b64"):
-                                st.session_state.img_perfil_dig = base64.b64decode(data["imagen_b64"])
-                            else:
-                                st.session_state.img_perfil_dig = None
-                                
-                            st.success("Plantilla aplicada con éxito. Actualizando vista...")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error técnico al cargar: {str(e)}")
+                    st.file_uploader("Sube tu archivo .json", type=["json"], key="load_prof_dig")
+                    # Callback ejecutado antes del renderizado de la UI
+                    st.button("Aplicar Plantilla", key="btn_apply_dig", on_click=cb_aplicar_dig)
             with col_save:
                 with st.expander("💾 Guardar configuración actual"):
                     img_to_save = archivo_firma.getvalue() if archivo_firma else st.session_state.img_perfil_dig
